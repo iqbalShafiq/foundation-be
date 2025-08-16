@@ -1,14 +1,20 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Form, File, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import Optional, cast
+from typing import Optional, cast, List
+import base64
+import uuid
+import os
+import json
+from pathlib import Path
 
 from app.models import (
-    ChatRequest,
     User,
     ConversationDetailResponse,
     MessageResponse,
     PaginatedConversationsResponse,
+    ImageData,
+    ModelType,
 )
 from app.services.chat_service import chat_service
 from app.services.conversation_service import ConversationService
@@ -20,15 +26,52 @@ router = APIRouter(tags=["chat"])
 
 @router.post("/chat")
 async def chat(
-    request: ChatRequest, current_user: User = Depends(require_user_or_admin)
+    message: str = Form(...),
+    model: ModelType = Form(ModelType.STANDARD),
+    conversation_id: Optional[str] = Form(None),
+    images: Optional[List[UploadFile]] = File(None),
+    current_user: User = Depends(require_user_or_admin)
 ):
-    """Streaming chat endpoint"""
-    if not request.message.strip():
+    """Streaming chat endpoint with multipart form support for images"""
+    if not message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    # Save uploaded images and create ImageData format
+    image_data_list = None
+    if images:
+        image_data_list = []
+        uploads_dir = Path("uploads/images")
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        
+        for image_file in images:
+            if not image_file.content_type or not image_file.content_type.startswith('image/'):
+                raise HTTPException(status_code=400, detail=f"File {image_file.filename} is not an image")
+            
+            # Generate unique filename
+            file_extension = Path(image_file.filename).suffix if image_file.filename else '.jpg'
+            unique_filename = f"{uuid.uuid4()}{file_extension}"
+            file_path = uploads_dir / unique_filename
+            
+            # Save file to disk
+            image_content = await image_file.read()
+            with open(file_path, "wb") as f:
+                f.write(image_content)
+            
+            # Create URL for the saved image
+            image_url = f"/uploads/images/{unique_filename}"
+            
+            # Still encode to base64 for OpenAI API compatibility
+            base64_data = base64.b64encode(image_content).decode('utf-8')
+            
+            image_data_list.append(ImageData(
+                data=base64_data,
+                mime_type=image_file.content_type,
+                url=image_url  # Add URL field
+            ))
 
     return StreamingResponse(
         chat_service.generate_stream_response(
-            request.message, request.model, str(request.conversation_id), cast(int, current_user.id)
+            message, model, conversation_id, cast(int, current_user.id), image_data_list
         ),
         media_type="text/plain",
         headers={
@@ -37,6 +80,7 @@ async def chat(
             "Content-Type": "text/event-stream",
         },
     )
+
 
 
 @router.get("/conversations", response_model=PaginatedConversationsResponse)
@@ -90,6 +134,7 @@ async def get_conversation_detail(
                         "id": msg.id,
                         "role": msg.role,
                         "content": msg.content,
+                        "image_urls": json.loads(msg.image_urls) if hasattr(msg, 'image_urls') and msg.image_urls else None,
                         "created_at": msg.created_at.isoformat(),
                     }
                 )

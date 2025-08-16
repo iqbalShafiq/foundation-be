@@ -211,3 +211,6 @@ $RECYCLE.BIN/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Uploads
+uploads/*

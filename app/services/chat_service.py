@@ -1,10 +1,10 @@
 import json
 import uuid
-from typing import AsyncGenerator, Dict, cast
+from typing import AsyncGenerator, Dict, cast, List, Optional, Any
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain.memory import ConversationBufferWindowMemory
-from app.models import ModelType, Conversation, Message, UserPreferences
+from app.models import ModelType, Conversation, Message, UserPreferences, ImageData
 from app.database import get_db
 
 
@@ -78,7 +78,23 @@ class ChatService:
         finally:
             db.close()
 
-    def _save_conversation_and_messages_to_db(self, conversation_id: str, user_id: int, user_message: str, ai_message: str, model_type: ModelType):
+    def _process_images_for_openai(self, images: Optional[List[ImageData]]) -> List[Dict[str, Any]]:
+        """Convert ImageData objects to OpenAI format"""
+        if not images:
+            return []
+        
+        image_contents = []
+        for image in images:
+            image_contents.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{image.mime_type};base64,{image.data}",
+                    "detail": "auto"
+                }
+            })
+        return image_contents
+
+    def _save_conversation_and_messages_to_db(self, conversation_id: str, user_id: int, user_message: str, ai_message: str, model_type: ModelType, image_urls: Optional[List[str]] = None):
         """Save conversation and messages to database"""
         db = next(get_db())
         try:
@@ -99,11 +115,12 @@ class ChatService:
                 # We just need to mark the object as modified
                 db.merge(existing)
             
-            # Save user message
+            # Save user message with image URLs
             user_msg = Message(
                 conversation_id=conversation_id,
                 role="user",
-                content=user_message
+                content=user_message,
+                image_urls=json.dumps(image_urls) if image_urls else None
             )
             db.add(user_msg)
             
@@ -123,7 +140,7 @@ class ChatService:
             db.close()
 
     async def generate_stream_response(
-        self, message: str, model_type: ModelType = ModelType.STANDARD, conversation_id: str | None = None, user_id: int | None = None
+        self, message: str, model_type: ModelType = ModelType.STANDARD, conversation_id: str | None = None, user_id: int | None = None, images: Optional[List[ImageData]] = None
     ) -> AsyncGenerator[str, None]:
         """Generate streaming response from ChatOpenAI with conversation memory"""
         try:
@@ -148,7 +165,15 @@ class ChatService:
             if system_prompt:
                 messages.append(system_prompt)
             messages.extend(chat_history)
-            messages.append(HumanMessage(content=message))
+            
+            # Create user message content with text and images
+            if images:
+                user_content: List[Dict[str, Any]] = [{"type": "text", "text": message}]
+                image_contents = self._process_images_for_openai(images)
+                user_content.extend(image_contents)
+                messages.append(HumanMessage(content=user_content))
+            else:
+                messages.append(HumanMessage(content=message))
 
             # Get the appropriate LLM for the model type
             llm = self.get_llm(model_type)
@@ -170,7 +195,9 @@ class ChatService:
 
             # Save to database if user_id is provided
             if user_id:
-                self._save_conversation_and_messages_to_db(conversation_id, user_id, message, ai_response_content, model_type)
+                # Extract image URLs from images
+                image_urls = [img.url for img in images if img.url] if images else None
+                self._save_conversation_and_messages_to_db(conversation_id, user_id, message, ai_response_content, model_type, image_urls)
 
             # Send final message
             final_data = {"content": "", "done": True, "conversation_id": conversation_id}

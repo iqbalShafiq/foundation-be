@@ -2,9 +2,10 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
-from app.routers import chat, health, auth, feedback, preferences
+from app.routers import chat, health, auth, feedback, preferences, gallery
 from app.database import engine
 from app.models import Base
 
@@ -87,9 +88,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount static files
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 # Include routers
 app.include_router(auth.router)
 app.include_router(chat.router)
+app.include_router(gallery.router)
 app.include_router(feedback.router)
 app.include_router(preferences.router)
 app.include_router(health.router)

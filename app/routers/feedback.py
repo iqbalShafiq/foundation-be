@@ -74,7 +74,7 @@ def delete_feedback(
         raise HTTPException(status_code=404, detail="Feedback not found")
     
     # Only the user who created the feedback can delete it
-    if feedback.user_id != current_user.id:
+    if bool(feedback.user_id) != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this feedback")
     
     db.delete(feedback)

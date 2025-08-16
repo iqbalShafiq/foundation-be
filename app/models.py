@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional, List
+from typing import Optional, List, Union
 import uuid
 from datetime import datetime
 from enum import Enum
@@ -16,10 +16,17 @@ class ModelType(str, Enum):
     REASONING = "Reasoning"
 
 
+class ImageData(BaseModel):
+    data: str  # Base64 encoded image data
+    mime_type: str  # e.g., "image/jpeg", "image/png"
+    url: Optional[str] = None  # URL to access the saved image
+
+
 class ChatRequest(BaseModel):
     message: str
     model: ModelType = ModelType.STANDARD
     conversation_id: Optional[str] = None
+    images: Optional[List[ImageData]] = None
 
 
 class HealthResponse(BaseModel):
@@ -106,6 +113,7 @@ class Message(Base):
     conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
     role = Column(String, nullable=False)  # "user" or "assistant"
     content = Column(Text, nullable=False)
+    image_urls = Column(Text, nullable=True)  # JSON array of image URLs
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     conversation = relationship("Conversation")
@@ -142,6 +150,7 @@ class MessageResponse(BaseModel):
     id: int
     role: str
     content: str
+    image_urls: Optional[List[str]] = None
     created_at: str
 
     class Config:

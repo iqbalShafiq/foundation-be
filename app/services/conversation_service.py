@@ -1,7 +1,8 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from typing import List, Optional
-from app.models import Conversation, Message, ConversationResponse, MessageResponse
+import json
+from app.models import Conversation, Message, ConversationResponse, MessageResponse, MessageDocumentContext, DocumentContextInfo
 
 
 class ConversationService:
@@ -128,17 +129,50 @@ class ConversationService:
             related_chats = []
             if related_messages:
                 related_chats = [
-                    MessageResponse.model_validate({
-                        "id": msg.id,
-                        "role": msg.role,
-                        "content": msg.content,
-                        "created_at": msg.created_at.isoformat(),
-                    })
+                    self._message_to_response(msg)
                     for msg in related_messages
                 ]
             base_data["related_chats"] = related_chats
         
         return ConversationResponse.model_validate(base_data)
+
+    def _message_to_response(self, message: Message) -> MessageResponse:
+        """Convert Message model to MessageResponse with document context"""
+        # Parse document context if exists and field is available
+        document_context = None
+        if hasattr(message, 'document_context') and message.document_context:
+            try:
+                context_data = json.loads(message.document_context)
+                if context_data:
+                    documents = [
+                        DocumentContextInfo.model_validate(doc)
+                        for doc in context_data.get("documents", [])
+                    ]
+                    document_context = MessageDocumentContext(
+                        collection_id=context_data.get("collection_id"),
+                        documents=documents,
+                        context_chunks_count=context_data.get("context_chunks_count", 0)
+                    )
+            except (json.JSONDecodeError, ValueError, Exception):
+                # If JSON parsing fails or any other error, ignore document context
+                document_context = None
+        
+        # Parse image URLs if exists
+        image_urls = None
+        if hasattr(message, 'image_urls') and message.image_urls:
+            try:
+                image_urls = json.loads(message.image_urls)
+            except (json.JSONDecodeError, ValueError):
+                image_urls = None
+        
+        return MessageResponse(
+            id=message.id,
+            role=message.role,
+            content=message.content,
+            image_urls=image_urls,
+            document_context=document_context,
+            created_at=message.created_at.isoformat()
+        )
 
     def get_conversation_detail(self, conversation_id: str, user_id: int):
         """Get detailed conversation with full message history"""

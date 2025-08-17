@@ -10,7 +10,6 @@ from pathlib import Path
 from app.models import (
     User,
     ConversationDetailResponse,
-    MessageResponse,
     PaginatedConversationsResponse,
     ImageData,
     ModelType,
@@ -109,7 +108,7 @@ async def chat(
 
     return StreamingResponse(
         chat_service.generate_stream_response(
-            message, model, conversation_id, cast(int, current_user.id), image_data_list, context_sources
+            message, model, conversation_id, cast(int, current_user.id), image_data_list, context_sources, context_collection
         ),
         media_type="text/plain",
         headers={
@@ -167,15 +166,7 @@ async def get_conversation_detail(
             "created_at": conversation.created_at.isoformat(),
             "updated_at": conversation.updated_at.isoformat(),
             "messages": [
-                MessageResponse.model_validate(
-                    {
-                        "id": msg.id,
-                        "role": msg.role,
-                        "content": msg.content,
-                        "image_urls": json.loads(msg.image_urls) if hasattr(msg, 'image_urls') and msg.image_urls else None,
-                        "created_at": msg.created_at.isoformat(),
-                    }
-                )
+                conversation_service._message_to_response(msg)
                 for msg in messages
             ],
         }

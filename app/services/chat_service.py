@@ -128,8 +128,35 @@ class ChatService:
             return context_prompt
         
         return ""
+    
+    def _build_document_context_info(self, context_sources: List[ContextSource], collection_id: Optional[str] = None) -> dict:
+        """Build document context info from context sources for storage"""
+        if not context_sources:
+            return {}
+        
+        # Get unique documents from context sources
+        documents_map = {}
+        for source in context_sources:
+            if source.document_id not in documents_map:
+                # Extract file extension from document name
+                file_extension = None
+                if '.' in source.document_name:
+                    file_extension = source.document_name.split('.')[-1]
+                
+                documents_map[source.document_id] = {
+                    "document_id": source.document_id,
+                    "title": source.document_name,
+                    "url": None,  # Could be enhanced to include document URL if available
+                    "file_extension": file_extension
+                }
+        
+        return {
+            "collection_id": collection_id,
+            "documents": list(documents_map.values()),
+            "context_chunks_count": len(context_sources)
+        }
 
-    def _save_conversation_and_messages_to_db(self, conversation_id: str, user_id: int, user_message: str, ai_message: str, model_type: ModelType, image_urls: Optional[List[str]] = None):
+    def _save_conversation_and_messages_to_db(self, conversation_id: str, user_id: int, user_message: str, ai_message: str, model_type: ModelType, image_urls: Optional[List[str]] = None, document_context: Optional[dict] = None):
         """Save conversation and messages to database"""
         db = next(get_db())
         try:
@@ -150,12 +177,13 @@ class ChatService:
                 # We just need to mark the object as modified
                 db.merge(existing)
             
-            # Save user message with image URLs
+            # Save user message with image URLs and document context
             user_msg = Message(
                 conversation_id=conversation_id,
                 role="user",
                 content=user_message,
-                image_urls=json.dumps(image_urls) if image_urls else None
+                image_urls=json.dumps(image_urls) if image_urls else None,
+                document_context=json.dumps(document_context) if document_context else None
             )
             db.add(user_msg)
             
@@ -175,7 +203,7 @@ class ChatService:
             db.close()
 
     async def generate_stream_response(
-        self, message: str, model_type: ModelType = ModelType.STANDARD, conversation_id: str | None = None, user_id: int | None = None, images: Optional[List[ImageData]] = None, context_sources: Optional[List[ContextSource]] = None
+        self, message: str, model_type: ModelType = ModelType.STANDARD, conversation_id: str | None = None, user_id: int | None = None, images: Optional[List[ImageData]] = None, context_sources: Optional[List[ContextSource]] = None, collection_id: Optional[str] = None
     ) -> AsyncGenerator[str, None]:
         """Generate streaming response from ChatOpenAI with conversation memory and document context"""
         try:
@@ -192,6 +220,7 @@ class ChatService:
             # Build context-aware user message
             enhanced_message = message
             context_metadata = None
+            document_context_info = None
             
             if context_sources:
                 # Build context prompt from retrieved sources
@@ -207,6 +236,8 @@ class ChatService:
                         }
                         for source in context_sources
                     ]
+                    # Build document context info for storage
+                    document_context_info = self._build_document_context_info(context_sources, collection_id)
             
             # Get user system prompt if user_id is provided
             system_prompt = None
@@ -260,7 +291,7 @@ class ChatService:
             if user_id:
                 # Extract image URLs from images
                 image_urls = [img.url for img in images if img.url] if images else None
-                self._save_conversation_and_messages_to_db(conversation_id, user_id, message, ai_response_content, model_type, image_urls)
+                self._save_conversation_and_messages_to_db(conversation_id, user_id, message, ai_response_content, model_type, image_urls, document_context_info)
 
             # Send final message
             final_data = {"content": "", "done": True, "conversation_id": conversation_id}

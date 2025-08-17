@@ -114,6 +114,7 @@ class Message(Base):
     role = Column(String, nullable=False)  # "user" or "assistant"
     content = Column(Text, nullable=False)
     image_urls = Column(Text, nullable=True)  # JSON array of image URLs
+    document_context = Column(Text, nullable=True)  # JSON object with document context info
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     conversation = relationship("Conversation")
@@ -146,11 +147,23 @@ class ConversationResponse(BaseModel):
         from_attributes = True
 
 
+class DocumentContextInfo(BaseModel):
+    document_id: str
+    title: str
+    url: Optional[str] = None
+    file_extension: Optional[str] = None
+
+class MessageDocumentContext(BaseModel):
+    collection_id: Optional[str] = None
+    documents: List[DocumentContextInfo] = []
+    context_chunks_count: int = 0
+
 class MessageResponse(BaseModel):
     id: int
     role: str
     content: str
     image_urls: Optional[List[str]] = None
+    document_context: Optional[MessageDocumentContext] = None
     created_at: str
 
     class Config:

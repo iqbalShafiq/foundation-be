@@ -15,9 +15,11 @@ from app.models import (
     PaginatedConversationsResponse,
     ImageData,
     ModelType,
+    ContextSource,
 )
 from app.services.chat_service import chat_service
 from app.services.conversation_service import ConversationService
+from app.services.rag_service import RAGService
 from app.dependencies import require_user_or_admin
 from app.database import get_db
 
@@ -30,11 +32,48 @@ async def chat(
     model: ModelType = Form(ModelType.STANDARD),
     conversation_id: Optional[str] = Form(None),
     images: Optional[List[UploadFile]] = File(None),
-    current_user: User = Depends(require_user_or_admin)
+    # NEW: Document context parameters
+    document_contexts: Optional[str] = Form(None),  # JSON string of document IDs
+    context_collection: Optional[str] = Form(None),  # Collection ID
+    max_context_chunks: int = Form(10),  # Maximum chunks to retrieve
+    context_relevance_threshold: float = Form(0.1),  # Similarity threshold (lowered for better recall)
+    current_user: User = Depends(require_user_or_admin),
+    db: Session = Depends(get_db)
 ):
-    """Streaming chat endpoint with multipart form support for images"""
+    """Streaming chat endpoint with multipart form support for images and document context"""
     if not message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+    # Parse document context parameters
+    parsed_document_ids = None
+    if document_contexts:
+        try:
+            parsed_document_ids = json.loads(document_contexts)
+            if not isinstance(parsed_document_ids, list):
+                raise ValueError("document_contexts must be a JSON array")
+        except (json.JSONDecodeError, ValueError) as e:
+            raise HTTPException(status_code=400, detail=f"Invalid document_contexts format: {e}")
+
+    # Retrieve document context if specified
+    context_sources: Optional[List[ContextSource]] = None
+    if parsed_document_ids or context_collection:
+        try:
+            rag_service = RAGService(db)
+            context_sources = rag_service.retrieve_context(
+                query=message,
+                user_id=cast(int, current_user.id),
+                document_ids=parsed_document_ids,
+                collection_id=context_collection,
+                max_chunks=max_context_chunks,
+                relevance_threshold=context_relevance_threshold
+            )
+        except Exception as e:
+            # Log error but don't fail the chat - just proceed without context
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error retrieving document context: {e}")
+            logger.exception("Full traceback:")
+            context_sources = None
 
     # Save uploaded images and create ImageData format
     image_data_list = None
@@ -71,7 +110,7 @@ async def chat(
 
     return StreamingResponse(
         chat_service.generate_stream_response(
-            message, model, conversation_id, cast(int, current_user.id), image_data_list
+            message, model, conversation_id, cast(int, current_user.id), image_data_list, context_sources
         ),
         media_type="text/plain",
         headers={

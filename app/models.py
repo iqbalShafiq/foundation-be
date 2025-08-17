@@ -232,3 +232,141 @@ class UserPreferencesResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class DocumentStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class DocumentType(str, Enum):
+    PDF = "pdf"
+    DOCX = "docx"
+    XLSX = "xlsx"
+    PPTX = "pptx"
+
+
+class Document(Base):
+    __tablename__ = "documents"
+
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    filename = Column(String, nullable=False)
+    original_filename = Column(String, nullable=False)
+    file_type = Column(String, nullable=False)
+    file_size = Column(Integer, nullable=False)
+    file_path = Column(String, nullable=False)
+    processing_status = Column(String, default=DocumentStatus.PENDING.value)
+    chunk_count = Column(Integer, default=0)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    user = relationship("User")
+
+
+class DocumentChunk(Base):
+    __tablename__ = "document_chunks"
+
+    id = Column(String, primary_key=True, index=True)
+    document_id = Column(String, ForeignKey("documents.id"), nullable=False, index=True)
+    chunk_index = Column(Integer, nullable=False)
+    content = Column(Text, nullable=False)
+    chunk_metadata = Column(Text, nullable=True)  # JSON metadata
+    vector_id = Column(String, nullable=True)  # ChromaDB collection ID
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    document = relationship("Document")
+
+
+class DocumentCollection(Base):
+    __tablename__ = "document_collections"
+
+    id = Column(String, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    document_ids = Column(Text, nullable=False)  # JSON array of doc IDs
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    user = relationship("User")
+
+
+class ConversationContext(Base):
+    __tablename__ = "conversation_contexts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(String, ForeignKey("conversations.id"), nullable=False, index=True)
+    document_ids = Column(Text, nullable=True)  # JSON array of active contexts
+    collection_id = Column(String, ForeignKey("document_collections.id"), nullable=True)
+    context_settings = Column(Text, nullable=True)  # JSON: {max_chunks, threshold, etc}
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    conversation = relationship("Conversation")
+    collection = relationship("DocumentCollection")
+
+
+# Pydantic models for API responses
+class DocumentResponse(BaseModel):
+    id: str
+    filename: str
+    original_filename: str
+    file_type: str
+    file_size: int
+    processing_status: str
+    chunk_count: int
+    error_message: Optional[str]
+    document_url: Optional[str]  # URL to access the document
+    created_at: str
+    updated_at: str
+
+    class Config:
+        from_attributes = True
+
+
+class DocumentCollectionResponse(BaseModel):
+    id: str
+    name: str
+    description: Optional[str]
+    document_ids: List[str]
+    document_count: int
+    created_at: str
+    updated_at: str
+
+    class Config:
+        from_attributes = True
+
+
+class DocumentCollectionCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    document_ids: List[str] = []
+
+
+class DocumentSearchRequest(BaseModel):
+    query: str
+    document_ids: Optional[List[str]] = None
+    collection_id: Optional[str] = None
+    limit: int = 10
+    relevance_threshold: float = 0.7
+
+
+class DocumentSearchResult(BaseModel):
+    chunk_id: str
+    document_id: str
+    document_name: str
+    content: str
+    page_number: Optional[int]
+    relevance_score: float
+    metadata: Optional[dict]
+
+
+class ContextSource(BaseModel):
+    document_id: str
+    document_name: str
+    chunk_text: str
+    page_number: Optional[int]
+    relevance_score: float

@@ -5,7 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
-from app.routers import chat, health, auth, feedback, preferences, gallery
+from app.routers import chat, health, auth, feedback, preferences, gallery, documents
 from app.database import engine
 from app.models import Base
 
@@ -94,6 +94,7 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 # Include routers
 app.include_router(auth.router)
 app.include_router(chat.router)
+app.include_router(documents.router)
 app.include_router(gallery.router)
 app.include_router(feedback.router)
 app.include_router(preferences.router)

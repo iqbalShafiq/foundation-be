@@ -4,7 +4,7 @@ from typing import AsyncGenerator, Dict, cast, List, Optional, Any
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain.memory import ConversationBufferWindowMemory
-from app.models import ModelType, Conversation, Message, UserPreferences, ImageData
+from app.models import ModelType, Conversation, Message, UserPreferences, ImageData, ContextSource
 from app.database import get_db
 
 
@@ -94,6 +94,38 @@ class ChatService:
             })
         return image_contents
 
+    def _build_context_prompt(self, context_sources: List[ContextSource], max_context_length: int = 4000) -> str:
+        """Build context prompt from retrieved document sources"""
+        if not context_sources:
+            return ""
+        
+        # Sort by relevance score
+        sorted_sources = sorted(context_sources, key=lambda x: x.relevance_score, reverse=True)
+        
+        context_parts = []
+        current_length = 0
+        
+        for source in sorted_sources:
+            # Format source with metadata
+            source_text = f"[Document: {source.document_name}"
+            if source.page_number:
+                source_text += f", Page {source.page_number}"
+            source_text += f"]\n{source.chunk_text}\n\n"
+            
+            # Check if adding this source would exceed length limit
+            if current_length + len(source_text) > max_context_length:
+                break
+            
+            context_parts.append(source_text)
+            current_length += len(source_text)
+        
+        if context_parts:
+            context_prompt = "Based on the following documents:\n\n" + "".join(context_parts)
+            context_prompt += "Please answer the user's question using the information from these documents. If the documents don't contain relevant information, please say so."
+            return context_prompt
+        
+        return ""
+
     def _save_conversation_and_messages_to_db(self, conversation_id: str, user_id: int, user_message: str, ai_message: str, model_type: ModelType, image_urls: Optional[List[str]] = None):
         """Save conversation and messages to database"""
         db = next(get_db())
@@ -140,9 +172,9 @@ class ChatService:
             db.close()
 
     async def generate_stream_response(
-        self, message: str, model_type: ModelType = ModelType.STANDARD, conversation_id: str | None = None, user_id: int | None = None, images: Optional[List[ImageData]] = None
+        self, message: str, model_type: ModelType = ModelType.STANDARD, conversation_id: str | None = None, user_id: int | None = None, images: Optional[List[ImageData]] = None, context_sources: Optional[List[ContextSource]] = None
     ) -> AsyncGenerator[str, None]:
-        """Generate streaming response from ChatOpenAI with conversation memory"""
+        """Generate streaming response from ChatOpenAI with conversation memory and document context"""
         try:
             # Generate conversation ID if not provided
             if not conversation_id:
@@ -153,6 +185,25 @@ class ChatService:
             
             # Get conversation history
             chat_history = memory.chat_memory.messages if memory.chat_memory.messages else []
+            
+            # Build context-aware user message
+            enhanced_message = message
+            context_metadata = None
+            
+            if context_sources:
+                # Build context prompt from retrieved sources
+                context_prompt = self._build_context_prompt(context_sources)
+                if context_prompt:
+                    enhanced_message = f"{context_prompt}\n\nUser Question: {message}"
+                    context_metadata = [
+                        {
+                            "document_id": source.document_id,
+                            "document_name": source.document_name,
+                            "page_number": source.page_number,
+                            "relevance_score": source.relevance_score
+                        }
+                        for source in context_sources
+                    ]
             
             # Get user system prompt if user_id is provided
             system_prompt = None
@@ -168,12 +219,12 @@ class ChatService:
             
             # Create user message content with text and images
             if images:
-                user_content: List[Dict[str, Any]] = [{"type": "text", "text": message}]
+                user_content: List[Dict[str, Any]] = [{"type": "text", "text": enhanced_message}]
                 image_contents = self._process_images_for_openai(images)
                 user_content.extend(image_contents)
                 messages.append(HumanMessage(content=user_content))
             else:
-                messages.append(HumanMessage(content=message))
+                messages.append(HumanMessage(content=enhanced_message))
 
             # Get the appropriate LLM for the model type
             llm = self.get_llm(model_type)
@@ -185,8 +236,17 @@ class ChatService:
             async for chunk in llm.astream(messages):
                 if chunk.content:
                     ai_response_content += cast(str, chunk.content)
-                    # Format as SSE (Server-Sent Events)
-                    data = {"content": chunk.content, "done": False, "conversation_id": conversation_id}
+                    # Format as SSE (Server-Sent Events) with context metadata
+                    data = {
+                        "content": chunk.content, 
+                        "done": False, 
+                        "conversation_id": conversation_id
+                    }
+                    
+                    # Include context sources in the first chunk
+                    if context_metadata and ai_response_content == chunk.content:
+                        data["context_sources"] = context_metadata
+                    
                     yield f"data: {json.dumps(data)}\n\n"
 
             # Save the conversation to memory

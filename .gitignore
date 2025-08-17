@@ -214,3 +214,6 @@ Thumbs.db
 
 # Uploads
 uploads/*
+
+# Data
+data/*

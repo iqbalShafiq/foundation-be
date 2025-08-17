@@ -6,7 +6,7 @@ import logging
 import os
 
 from app.models import (
-    User, DocumentResponse, DocumentCollectionResponse, DocumentCollectionCreate,
+    User, DocumentResponse, DocumentCollectionResponse, DocumentCollectionCreate, DocumentCollectionUpdate,
     DocumentSearchRequest, DocumentSearchResult, DocumentStatus, DocumentType
 )
 from app.services.document_service import DocumentService
@@ -107,6 +107,122 @@ async def get_documents(
         user_id=cast(int, current_user.id),
         status_filter=status
     )
+
+
+# Document Collections endpoints
+
+@router.post("/collections", response_model=DocumentCollectionResponse)
+async def create_collection(
+    collection_data: DocumentCollectionCreate,
+    current_user: User = Depends(require_user_or_admin),
+    db: Session = Depends(get_db)
+):
+    """Create a new document collection"""
+    document_service = DocumentService(db)
+    
+    try:
+        collection_id = document_service.create_collection(
+            user_id=cast(int, current_user.id),
+            name=collection_data.name,
+            description=collection_data.description,
+            document_ids=collection_data.document_ids
+        )
+        
+        # Get created collection
+        collections = document_service.get_user_collections(cast(int, current_user.id))
+        created_collection = next((c for c in collections if c.id == collection_id), None)
+        
+        if not created_collection:
+            raise HTTPException(status_code=500, detail="Failed to retrieve created collection")
+        
+        return created_collection
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error creating collection: {e}")
+        raise HTTPException(status_code=500, detail=f"Collection creation failed: {str(e)}")
+
+
+@router.get("/collections", response_model=List[DocumentCollectionResponse])
+async def get_collections(
+    current_user: User = Depends(require_user_or_admin),
+    db: Session = Depends(get_db)
+):
+    """Get all document collections for the current user"""
+    document_service = DocumentService(db)
+    return document_service.get_user_collections(cast(int, current_user.id))
+
+
+@router.get("/collections/{collection_id}", response_model=DocumentCollectionResponse)
+async def get_collection(
+    collection_id: str,
+    current_user: User = Depends(require_user_or_admin),
+    db: Session = Depends(get_db)
+):
+    """Get specific collection by ID"""
+    document_service = DocumentService(db)
+    collections = document_service.get_user_collections(cast(int, current_user.id))
+    
+    collection = next((c for c in collections if c.id == collection_id), None)
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    
+    return collection
+
+
+@router.put("/collections/{collection_id}", response_model=DocumentCollectionResponse)
+async def update_collection(
+    collection_id: str,
+    update_data: DocumentCollectionUpdate,
+    current_user: User = Depends(require_user_or_admin),
+    db: Session = Depends(get_db)
+):
+    """Update document collection"""
+    document_service = DocumentService(db)
+    
+    try:
+        success = document_service.update_collection(
+            collection_id=collection_id,
+            user_id=cast(int, current_user.id),
+            name=update_data.name,
+            description=update_data.description,
+            document_ids=update_data.document_ids
+        )
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Collection not found")
+        
+        # Get updated collection
+        collections = document_service.get_user_collections(cast(int, current_user.id))
+        updated_collection = next((c for c in collections if c.id == collection_id), None)
+        
+        if not updated_collection:
+            raise HTTPException(status_code=500, detail="Failed to retrieve updated collection")
+        
+        return updated_collection
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error updating collection {collection_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Collection update failed: {str(e)}")
+
+
+@router.delete("/collections/{collection_id}")
+async def delete_collection(
+    collection_id: str,
+    current_user: User = Depends(require_user_or_admin),
+    db: Session = Depends(get_db)
+):
+    """Delete a document collection"""
+    document_service = DocumentService(db)
+    success = document_service.delete_collection(collection_id, cast(int, current_user.id))
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    
+    return {"message": "Collection deleted successfully"}
 
 
 @router.get("/{document_id}", response_model=DocumentResponse)
@@ -252,130 +368,6 @@ async def search_documents(
     except Exception as e:
         logger.error(f"Error searching documents: {e}")
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
-
-
-# Document Collections endpoints
-
-@router.post("/collections", response_model=DocumentCollectionResponse)
-async def create_collection(
-    collection_data: DocumentCollectionCreate,
-    current_user: User = Depends(require_user_or_admin),
-    db: Session = Depends(get_db)
-):
-    """Create a new document collection"""
-    document_service = DocumentService(db)
-    
-    try:
-        collection_id = document_service.create_collection(
-            user_id=cast(int, current_user.id),
-            name=collection_data.name,
-            description=collection_data.description,
-            document_ids=collection_data.document_ids
-        )
-        
-        # Get created collection
-        collections = document_service.get_user_collections(cast(int, current_user.id))
-        created_collection = next((c for c in collections if c.id == collection_id), None)
-        
-        if not created_collection:
-            raise HTTPException(status_code=500, detail="Failed to retrieve created collection")
-        
-        return created_collection
-        
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error creating collection: {e}")
-        raise HTTPException(status_code=500, detail=f"Collection creation failed: {str(e)}")
-
-
-@router.get("/collections", response_model=List[DocumentCollectionResponse])
-async def get_collections(
-    current_user: User = Depends(require_user_or_admin),
-    db: Session = Depends(get_db)
-):
-    """Get all document collections for the current user"""
-    document_service = DocumentService(db)
-    return document_service.get_user_collections(cast(int, current_user.id))
-
-
-@router.get("/collections/{collection_id}", response_model=DocumentCollectionResponse)
-async def get_collection(
-    collection_id: str,
-    current_user: User = Depends(require_user_or_admin),
-    db: Session = Depends(get_db)
-):
-    """Get specific collection by ID"""
-    document_service = DocumentService(db)
-    collections = document_service.get_user_collections(cast(int, current_user.id))
-    
-    collection = next((c for c in collections if c.id == collection_id), None)
-    if not collection:
-        raise HTTPException(status_code=404, detail="Collection not found")
-    
-    return collection
-
-
-@router.put("/collections/{collection_id}", response_model=DocumentCollectionResponse)
-async def update_collection(
-    collection_id: str,
-    name: Optional[str] = Form(None),
-    description: Optional[str] = Form(None),
-    document_ids: Optional[str] = Form(None),  # JSON string of document IDs
-    current_user: User = Depends(require_user_or_admin),
-    db: Session = Depends(get_db)
-):
-    """Update document collection"""
-    document_service = DocumentService(db)
-    
-    try:
-        # Parse document_ids if provided
-        parsed_document_ids = None
-        if document_ids:
-            import json
-            parsed_document_ids = json.loads(document_ids)
-        
-        success = document_service.update_collection(
-            collection_id=collection_id,
-            user_id=cast(int, current_user.id),
-            name=name,
-            description=description,
-            document_ids=parsed_document_ids
-        )
-        
-        if not success:
-            raise HTTPException(status_code=404, detail="Collection not found")
-        
-        # Get updated collection
-        collections = document_service.get_user_collections(cast(int, current_user.id))
-        updated_collection = next((c for c in collections if c.id == collection_id), None)
-        
-        if not updated_collection:
-            raise HTTPException(status_code=500, detail="Failed to retrieve updated collection")
-        
-        return updated_collection
-        
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error updating collection {collection_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Collection update failed: {str(e)}")
-
-
-@router.delete("/collections/{collection_id}")
-async def delete_collection(
-    collection_id: str,
-    current_user: User = Depends(require_user_or_admin),
-    db: Session = Depends(get_db)
-):
-    """Delete a document collection"""
-    document_service = DocumentService(db)
-    success = document_service.delete_collection(collection_id, cast(int, current_user.id))
-    
-    if not success:
-        raise HTTPException(status_code=404, detail="Collection not found")
-    
-    return {"message": "Collection deleted successfully"}
 
 
 @router.get("/stats/context")

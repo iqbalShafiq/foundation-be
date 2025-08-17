@@ -346,6 +346,12 @@ class DocumentCollectionCreate(BaseModel):
     document_ids: List[str] = []
 
 
+class DocumentCollectionUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    document_ids: Optional[List[str]] = None
+
+
 class DocumentSearchRequest(BaseModel):
     query: str
     document_ids: Optional[List[str]] = None

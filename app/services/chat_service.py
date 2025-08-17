@@ -1,11 +1,14 @@
 import json
 import uuid
+import logging
 from typing import AsyncGenerator, Dict, cast, List, Optional, Any
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain.memory import ConversationBufferWindowMemory
 from app.models import ModelType, Conversation, Message, UserPreferences, ImageData, ContextSource
 from app.database import get_db
+
+logger = logging.getLogger(__name__)
 
 
 class ChatService:
@@ -73,7 +76,7 @@ class ChatService:
             
             return " ".join(system_parts)
         except Exception as e:
-            print(f"Error fetching user preferences: {e}")
+            logger.error(f"Error fetching user preferences: {e}")
             return "You are a helpful AI assistant."
         finally:
             db.close()
@@ -167,7 +170,7 @@ class ChatService:
             db.commit()
         except Exception as e:
             db.rollback()
-            print(f"Error saving conversation and messages: {e}")
+            logger.error(f"Error saving conversation and messages: {e}")
         finally:
             db.close()
 

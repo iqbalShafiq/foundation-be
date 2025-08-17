@@ -4,7 +4,6 @@ from sqlalchemy.orm import Session
 from typing import Optional, cast, List
 import base64
 import uuid
-import os
 import json
 from pathlib import Path
 

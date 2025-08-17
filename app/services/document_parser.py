@@ -10,9 +10,6 @@ import PyPDF2
 from docx import Document as DocxDocument
 import openpyxl
 from pptx import Presentation
-# import pandas as pd  # Skip for now due to compilation issues
-from PIL import Image
-import pytesseract
 
 from app.models import DocumentType
 

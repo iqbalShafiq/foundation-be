@@ -161,10 +161,10 @@ async def get_document_status(
     current_user: User = Depends(require_user_or_admin),
     db: Session = Depends(get_db)
 ):
-    """Get document processing status with debug info"""
+    """Get document processing status"""
     from app.models import Document
     
-    # Direct query to see raw data
+    # Query document processing status
     raw_document = db.query(Document).filter(
         Document.id == document_id,
         Document.user_id == current_user.id
@@ -173,21 +173,12 @@ async def get_document_status(
     if not raw_document:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    # Debug info
-    logger.info(f"Raw status from DB: '{raw_document.processing_status}'")
-    logger.info(f"Status type: {type(raw_document.processing_status)}")
-    
     return {
         "document_id": document_id,
         "status": raw_document.processing_status,
         "chunk_count": raw_document.chunk_count,
         "error_message": raw_document.error_message,
-        "ready_for_search": raw_document.processing_status == "completed",
-        "debug": {
-            "raw_status": repr(raw_document.processing_status),
-            "status_length": len(str(raw_document.processing_status)) if raw_document.processing_status else 0,
-            "is_completed": raw_document.processing_status == "completed"
-        }
+        "ready_for_search": raw_document.processing_status == "completed"
     }
 
 

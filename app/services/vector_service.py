@@ -46,7 +46,7 @@ class VectorService:
         try:
             # Try to get existing collection
             collection = self.client.get_collection(collection_name)
-            logger.debug(f"Retrieved existing collection: {collection_name}")
+            logger.info(f"Retrieved existing collection: {collection_name}")
         except Exception:
             # Create new collection if it doesn't exist
             collection = self.client.create_collection(

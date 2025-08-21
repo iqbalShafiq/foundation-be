@@ -259,6 +259,7 @@ class DocumentType(str, Enum):
     DOCX = "docx"
     XLSX = "xlsx"
     PPTX = "pptx"
+    CSV = "csv"
 
 
 class Document(Base):

@@ -399,6 +399,7 @@ class DocumentService:
             '.docx': DocumentType.DOCX,
             '.xlsx': DocumentType.XLSX,
             '.pptx': DocumentType.PPTX,
+            '.csv': DocumentType.CSV,
         }
         
         return type_mapping.get(suffix)

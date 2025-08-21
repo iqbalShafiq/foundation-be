@@ -4,6 +4,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import uuid
+import csv
 
 # Document parsing libraries
 import PyPDF2
@@ -290,6 +291,70 @@ class PowerPointParser(DocumentParser):
         return chunks
 
 
+class CSVParser(DocumentParser):
+    """CSV file parser"""
+    
+    @staticmethod
+    def extract_text(file_path: str) -> List[DocumentChunk]:
+        """Extract text from CSV file"""
+        chunks = []
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8', newline='') as csvfile:
+                # Detect delimiter
+                sample = csvfile.read(1024)
+                csvfile.seek(0)
+                sniffer = csv.Sniffer()
+                try:
+                    delimiter = sniffer.sniff(sample).delimiter
+                except csv.Error:
+                    delimiter = ','
+                
+                # Read CSV
+                reader = csv.reader(csvfile, delimiter=delimiter)
+                rows = list(reader)
+                
+                if not rows:
+                    return chunks
+                
+                # Create text representation
+                csv_text = ""
+                
+                # Add headers if first row looks like headers
+                first_row = rows[0]
+                if first_row and all(isinstance(cell, str) and not cell.replace('.', '').replace('-', '').isdigit() for cell in first_row if cell.strip()):
+                    csv_text += "Headers: " + " | ".join(first_row) + "\n\n"
+                    data_rows = rows[1:]
+                else:
+                    data_rows = rows
+                
+                # Add data rows
+                for row_idx, row in enumerate(data_rows, 1):
+                    if any(cell.strip() for cell in row):
+                        csv_text += f"Row {row_idx}: " + " | ".join(str(cell) for cell in row) + "\n"
+                
+                # Create chunks
+                if csv_text.strip():
+                    text_chunks = CSVParser.chunk_text(csv_text)
+                    
+                    for chunk_idx, chunk_text in enumerate(text_chunks):
+                        chunks.append(DocumentChunk(
+                            content=chunk_text,
+                            metadata={
+                                "chunk_index": chunk_idx,
+                                "source_type": "csv_file",
+                                "total_rows": len(rows),
+                                "delimiter": delimiter
+                            }
+                        ))
+                        
+        except Exception as e:
+            logger.error(f"Error reading CSV file {file_path}: {e}")
+            raise
+            
+        return chunks
+
+
 class DocumentParserService:
     """Main service for parsing different document types"""
     
@@ -298,6 +363,7 @@ class DocumentParserService:
         DocumentType.DOCX: WordParser,
         DocumentType.XLSX: ExcelParser,
         DocumentType.PPTX: PowerPointParser,
+        DocumentType.CSV: CSVParser,
     }
     
     @classmethod

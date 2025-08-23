@@ -58,14 +58,14 @@ Note: This is a simulated response. In production, this tool would:
 
 
 @tool  
-def generate_chart(data_description: str, chart_type: str, chart_config: str) -> str:
+def generate_chart(data_description: str, chart_type: str = "bar", chart_config: str = "{}") -> str:
     """
     Generate interactive Plotly chart from data analysis results.
     
     Args:
         data_description: Description of the data to visualize
-        chart_type: Type of chart (bar, line, scatter, histogram, pie, box)
-        chart_config: JSON string with chart configuration
+        chart_type: Type of chart (bar, line, scatter, histogram, pie, box). Defaults to "bar"
+        chart_config: JSON string with chart configuration. Defaults to "{}"
         
     Returns:
         JSON string containing Plotly chart configuration

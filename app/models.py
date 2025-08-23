@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Dict
 import uuid
 from datetime import datetime
 from enum import Enum
@@ -164,6 +164,7 @@ class MessageResponse(BaseModel):
     content: str
     image_urls: Optional[List[str]] = None
     document_context: Optional[MessageDocumentContext] = None
+    chart_data: Optional[Dict] = None  # Chart data from generate_chart tool
     created_at: str
 
     class Config:

@@ -137,25 +137,34 @@ class ConversationService:
         return ConversationResponse.model_validate(base_data)
 
     def _message_to_response(self, message: Message) -> MessageResponse:
-        """Convert Message model to MessageResponse with document context"""
+        """Convert Message model to MessageResponse with document context and chart data"""
         # Parse document context if exists and field is available
         document_context = None
+        chart_data = None
         if hasattr(message, 'document_context') and message.document_context:
             try:
                 context_data = json.loads(message.document_context)
                 if context_data:
+                    # Handle regular document context
                     documents = [
                         DocumentContextInfo.model_validate(doc)
                         for doc in context_data.get("documents", [])
                     ]
-                    document_context = MessageDocumentContext(
-                        collection_id=context_data.get("collection_id"),
-                        documents=documents,
-                        context_chunks_count=context_data.get("context_chunks_count", 0)
-                    )
+                    if documents:  # Only create document_context if there are documents
+                        document_context = MessageDocumentContext(
+                            collection_id=context_data.get("collection_id"),
+                            documents=documents,
+                            context_chunks_count=context_data.get("context_chunks_count", 0)
+                        )
+                    
+                    # Handle chart data
+                    if "chart_data" in context_data:
+                        chart_data = context_data["chart_data"]
+                        
             except (json.JSONDecodeError, ValueError, Exception):
                 # If JSON parsing fails or any other error, ignore document context
                 document_context = None
+                chart_data = None
         
         # Parse image URLs if exists
         image_urls = None
@@ -171,6 +180,7 @@ class ConversationService:
             content=message.content,
             image_urls=image_urls,
             document_context=document_context,
+            chart_data=chart_data,
             created_at=message.created_at.isoformat()
         )
 

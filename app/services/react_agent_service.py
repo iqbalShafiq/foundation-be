@@ -176,27 +176,27 @@ class ReactAgentService:
 
         # Add data analysis capabilities description
         tools_description = """
-You have access to powerful data analysis tools:
+            You have access to powerful data analysis tools:
 
-1. analyze_dataframe: Use this tool when users ask questions about CSV or Excel data. This tool can:
-   - Load and analyze spreadsheet data
-   - Perform statistical operations
-   - Filter and group data
-   - Answer questions about data content and patterns
+            1. analyze_dataframe: Use this tool when users ask questions about CSV or Excel data. This tool can:
+            - Load and analyze spreadsheet data
+            - Perform statistical operations
+            - Filter and group data
+            - Answer questions about data content and patterns
 
-2. generate_chart: Use this tool to create interactive visualizations. This tool can:
-   - Generate various chart types (bar, line, scatter, pie, histogram, box plots)
-   - Return charts as JSON data for interactive display
-   - Customize chart appearance and labels
+            2. generate_chart: Use this tool to create interactive visualizations. This tool can:
+            - Generate various chart types (bar, line, scatter, pie, histogram, box plots)
+            - Return charts as JSON data for interactive display
+            - Customize chart appearance and labels
 
-When users ask questions about data in uploaded CSV/Excel files, or request visualizations, use these tools appropriately. 
+            When users ask questions about data in uploaded CSV/Excel files, or request visualizations, use these tools appropriately. 
 
-For CSV/Excel analysis questions, first use analyze_dataframe to understand the data, then optionally use generate_chart if visualization would be helpful.
+            For CSV/Excel analysis questions, first use analyze_dataframe to understand the data, then optionally use generate_chart if visualization would be helpful.
 
-For normal conversations without data analysis needs, respond directly without using tools.
+            For normal conversations without data analysis needs, respond directly without using tools.
 
-Always provide clear and helpful responses. When using tools, explain what you're doing and interpret the results for the user.
-"""
+            Always provide clear and helpful responses. When using tools, explain what you're doing and interpret the results for the user.
+        """
 
         # Combine all parts
         full_prompt = base_prompt
@@ -381,7 +381,7 @@ Always provide clear and helpful responses. When using tools, explain what you'r
                 event_name = event.get("name", "")
                 event_data = event.get("data", {})
                 
-                logger.info(f"LangGraph event: {event_type} - {event_name}")  # Changed to INFO for better visibility
+                logger.debug(f"LangGraph event: {event_type} - {event_name}")
                 
                 # Handle tool execution completion
                 if event_type == "on_tool_end":
@@ -400,7 +400,6 @@ Always provide clear and helpful responses. When using tools, explain what you'r
                             tool_output_str = str(tool_output)
                     except Exception as e:
                         logger.error(f"Error converting tool output to string: {e}")
-                        logger.error(f"Tool output type: {type(tool_output)}, attributes: {dir(tool_output) if hasattr(tool_output, '__dict__') else 'No attributes'}")
                         tool_output_str = "Tool output could not be serialized"
                     
                     accumulated_thinking += f"{tool_name}: {tool_output_str}\n"
@@ -408,38 +407,26 @@ Always provide clear and helpful responses. When using tools, explain what you'r
                     if tool_name == "generate_chart" and tool_output_str:
                         try:
                             # Parse chart data from string output
-                            logger.info(f"Chart tool output type: {type(tool_output_str)}")
-                            logger.info(f"Chart tool output content (first 500 chars): {tool_output_str[:500]}...")
-                            
-                            # Check if output is already a valid JSON string or needs parsing
                             if isinstance(tool_output_str, str) and tool_output_str.strip():
                                 chart_data_collected = json.loads(tool_output_str.strip())
                             else:
                                 chart_data_collected = tool_output_str
                             
-                            logger.info(f"Chart data successfully parsed: {type(chart_data_collected)}")
-                            
                             # Send chart data immediately after tool completion
                             try:
-                                # Test serialization first
-                                test_serialize = json.dumps(chart_data_collected)
                                 chart_json_str = json.dumps({'type': 'chart', 'content': chart_data_collected, 'done': False, 'conversation_id': conversation_id})
                                 yield f"data: {chart_json_str}\n\n"
                                 chart_data_sent = True
-                                logger.info("Chart data sent successfully to client")
                             except (TypeError, ValueError) as e:
                                 logger.error(f"Error serializing chart data: {e}")
-                                logger.error(f"Chart data content that failed: {str(chart_data_collected)[:200]}...")
                                 yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart data generated but could not be serialized for display', 'done': False, 'conversation_id': conversation_id})}\n\n"
                                 
                             yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart generated successfully!', 'done': False, 'conversation_id': conversation_id})}\n\n"
                         except json.JSONDecodeError as e:
                             logger.error(f"Error parsing chart JSON data: {e}")
-                            logger.error(f"Raw tool output that failed to parse: {tool_output_str}")
                             yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart generation completed', 'done': False, 'conversation_id': conversation_id})}\n\n"
                         except Exception as e:
                             logger.error(f"Error processing chart data: {e}")
-                            logger.error(f"Raw tool output: {tool_output_str}")
                             yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart generation completed', 'done': False, 'conversation_id': conversation_id})}\n\n"
                     else:
                         # Other tool outputs
@@ -486,7 +473,6 @@ Always provide clear and helpful responses. When using tools, explain what you'r
 
             # Send any remaining chart data that hasn't been sent yet
             if chart_data_collected and not chart_data_sent:
-                logger.info("Sending chart data at completion phase")
                 try:
                     chart_json_str = json.dumps({'type': 'chart', 'content': chart_data_collected, 'done': False, 'conversation_id': conversation_id})
                     yield f"data: {chart_json_str}\n\n"

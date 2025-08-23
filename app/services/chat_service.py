@@ -37,12 +37,40 @@ class ChatService:
     def get_memory(self, conversation_id: str) -> ConversationBufferWindowMemory:
         """Get or create memory for a conversation"""
         if conversation_id not in self._memories:
-            self._memories[conversation_id] = ConversationBufferWindowMemory(
+            memory = ConversationBufferWindowMemory(
                 k=10,  # Keep last 10 message pairs (20 total messages)
                 return_messages=True,
                 memory_key="chat_history"
             )
+            
+            # Load existing conversation history from database
+            self._load_conversation_history_into_memory(conversation_id, memory)
+            
+            self._memories[conversation_id] = memory
         return self._memories[conversation_id]
+
+    def _load_conversation_history_into_memory(self, conversation_id: str, memory: ConversationBufferWindowMemory):
+        """Load existing conversation history from database into memory"""
+        try:
+            db = next(get_db())
+            messages = db.query(Message).filter(
+                Message.conversation_id == conversation_id
+            ).order_by(Message.created_at).all()
+            
+            print(f"[CHATOPENAI DEBUG] Loading {len(messages)} messages from database for conversation {conversation_id}")
+            
+            # Add messages to memory in chronological order
+            for msg in messages:
+                if msg.role == "user":
+                    memory.chat_memory.add_user_message(str(msg.content))
+                elif msg.role == "assistant":
+                    memory.chat_memory.add_ai_message(str(msg.content))
+            
+            db.close()
+            
+        except Exception as e:
+            logger.error(f"Error loading conversation history: {e}")
+            # Don't fail if we can't load history - just continue with empty memory
 
     def _generate_conversation_title(self, message: str) -> str:
         """Generate a title from the first message"""
@@ -213,6 +241,13 @@ class ChatService:
 
             # Get memory for this conversation
             memory = self.get_memory(conversation_id)
+            
+            # Debug logging for ChatOpenAI
+            history_messages = memory.chat_memory.messages if memory.chat_memory.messages else []
+            print(f"[CHATOPENAI DEBUG] Conversation {conversation_id}")
+            print(f"[CHATOPENAI DEBUG] Messages in memory: {len(history_messages)}")
+            if history_messages:
+                print(f"[CHATOPENAI DEBUG] Recent messages: {[msg.content[:50] for msg in history_messages[-2:]]}")
             
             # Get conversation history
             chat_history = memory.chat_memory.messages if memory.chat_memory.messages else []

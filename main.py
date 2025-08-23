@@ -21,11 +21,15 @@ async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ):
     """Handle validation errors with a generic response format"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.error(f"Validation error: {exc.errors()}")
     return JSONResponse(
         status_code=400,
         content={
             "error": "Invalid request data",
-            "message": "Please check your input parameters"
+            "message": "Please check your input parameters",
+            "details": exc.errors()  # Include details for debugging
         }
     )
 

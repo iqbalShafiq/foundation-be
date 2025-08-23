@@ -15,7 +15,7 @@ from app.models import (
     ModelType,
     ContextSource,
 )
-from app.services.chat_service import chat_service
+from app.services.chat_router_service import chat_router_service
 from app.services.conversation_service import ConversationService
 from app.services.rag_service import RAGService
 from app.dependencies import require_user_or_admin
@@ -107,7 +107,7 @@ async def chat(
             ))
 
     return StreamingResponse(
-        chat_service.generate_stream_response(
+        chat_router_service.route_chat_request(
             message, model, conversation_id, cast(int, current_user.id), image_data_list, context_sources, context_collection
         ),
         media_type="text/plain",

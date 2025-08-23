@@ -12,6 +12,49 @@ from app.services.data_analysis_service import DataAnalysisService
 logger = logging.getLogger(__name__)
 
 
+def _deduplicate_content(content: str) -> str:
+    """
+    Remove duplicate sections from content.
+    Sometimes React Agent repeats the same response multiple times.
+    """
+    # Look for patterns like "Berikut adalah..." which often indicate start of duplicate sections
+    import re
+    
+    # Split by common starting patterns
+    patterns = [
+        r'Berikut adalah',
+        r'Berdasarkan',
+        r'Saya akan',
+        r'Here is',
+        r'Based on'
+    ]
+    
+    # Find all sections that start with these patterns
+    for pattern in patterns:
+        matches = list(re.finditer(pattern, content, re.IGNORECASE))
+        if len(matches) > 1:
+            # Take only the first occurrence and everything before the second
+            first_end = matches[1].start()
+            content = content[:first_end].strip()
+            break
+    
+    # Also try splitting by double paragraphs and removing duplicates
+    paragraphs = [p.strip() for p in content.split('\n\n') if p.strip()]
+    
+    # Remove duplicate paragraphs while preserving order
+    seen = set()
+    unique_paragraphs = []
+    
+    for paragraph in paragraphs:
+        # Use normalized version for comparison (remove extra whitespace)
+        normalized = ' '.join(paragraph.split())
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            unique_paragraphs.append(paragraph)
+    
+    return '\n\n'.join(unique_paragraphs)
+
+
 class ReactAgentService:
     def __init__(self):
         self._agents = {}
@@ -425,7 +468,8 @@ Thought:{{agent_scratchpad}}""")
                             final_answer_portion = accumulated_content[final_answer_start:].strip()
                             
                             if final_answer_portion:
-                                answer_content_for_storage += final_answer_portion
+                                # Set the initial answer content (don't accumulate, just set)
+                                answer_content_for_storage = final_answer_portion
                                 yield f"data: {json.dumps({'type': 'answer','content': final_answer_portion,'done': False,'conversation_id': conversation_id})}\n\n"
                         
                         elif in_final_answer_phase:
@@ -454,7 +498,11 @@ Thought:{{agent_scratchpad}}""")
                                 if not chart_data_sent:
                                     yield f"data: {json.dumps({'type': 'chart', 'content': chart_data_collected, 'done': False, 'conversation_id': conversation_id})}\n\n"
                                     chart_data_sent = True
-                                answer_content_for_storage += token
+                                # Start fresh for answer content when switching modes
+                                if not answer_content_for_storage:
+                                    answer_content_for_storage = token
+                                else:
+                                    answer_content_for_storage += token
                                 yield f"data: {json.dumps({'type': 'answer','content': token,'done': False,'conversation_id': conversation_id})}\n\n"
                             else:
                                 # This is thinking phase (includes thoughts, actions, observations)
@@ -490,9 +538,11 @@ Thought:{{agent_scratchpad}}""")
                             yield f"data: {json.dumps({'type': 'chart', 'content': chart_data_collected, 'done': False, 'conversation_id': conversation_id})}\n\n"
                             chart_data_sent = True
 
-            # Use the actual streamed answer content for storage
+            # Use the actual streamed answer content for storage with deduplication
             if answer_content_for_storage.strip():
-                final_answer_for_storage = answer_content_for_storage.strip()
+                # Clean up duplicate content - sometimes React Agent repeats the same response
+                cleaned_content = _deduplicate_content(answer_content_for_storage.strip())
+                final_answer_for_storage = cleaned_content
             elif not final_answer_for_storage and chart_data_collected:
                 # If we have chart data but no captured answer content, use a meaningful message
                 if not chart_data_sent:

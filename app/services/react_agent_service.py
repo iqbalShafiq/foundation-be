@@ -380,6 +380,7 @@ Thought:{{agent_scratchpad}}""")
             in_final_answer_phase = False
             chart_data_collected = None
             chart_data_sent = False
+            answer_content_for_storage = ""
 
             # --- STREAMING LOOP ---
             async for event in agent.astream_events(agent_input, version="v2"):
@@ -424,10 +425,12 @@ Thought:{{agent_scratchpad}}""")
                             final_answer_portion = accumulated_content[final_answer_start:].strip()
                             
                             if final_answer_portion:
+                                answer_content_for_storage += final_answer_portion
                                 yield f"data: {json.dumps({'type': 'answer','content': final_answer_portion,'done': False,'conversation_id': conversation_id})}\n\n"
                         
                         elif in_final_answer_phase:
-                            # Continue streaming final answer tokens
+                            # Continue streaming final answer tokens and collect for storage
+                            answer_content_for_storage += token
                             yield f"data: {json.dumps({'type': 'answer','content': token,'done': False,'conversation_id': conversation_id})}\n\n"
                         
                         else:
@@ -451,6 +454,7 @@ Thought:{{agent_scratchpad}}""")
                                 if not chart_data_sent:
                                     yield f"data: {json.dumps({'type': 'chart', 'content': chart_data_collected, 'done': False, 'conversation_id': conversation_id})}\n\n"
                                     chart_data_sent = True
+                                answer_content_for_storage += token
                                 yield f"data: {json.dumps({'type': 'answer','content': token,'done': False,'conversation_id': conversation_id})}\n\n"
                             else:
                                 # This is thinking phase (includes thoughts, actions, observations)
@@ -486,13 +490,14 @@ Thought:{{agent_scratchpad}}""")
                             yield f"data: {json.dumps({'type': 'chart', 'content': chart_data_collected, 'done': False, 'conversation_id': conversation_id})}\n\n"
                             chart_data_sent = True
 
-            # Handle case where no proper final answer was generated
-            if not final_answer_for_storage and chart_data_collected:
-                # If we have chart data but no final answer, send chart if not sent yet
+            # Use the actual streamed answer content for storage
+            if answer_content_for_storage.strip():
+                final_answer_for_storage = answer_content_for_storage.strip()
+            elif not final_answer_for_storage and chart_data_collected:
+                # If we have chart data but no captured answer content, use a meaningful message
                 if not chart_data_sent:
                     yield f"data: {json.dumps({'type': 'chart', 'content': chart_data_collected, 'done': False, 'conversation_id': conversation_id})}\n\n"
                     chart_data_sent = True
-                # Don't send hardcoded message, let it be empty for proper completion
                 final_answer_for_storage = "Chart generated successfully."
             elif not final_answer_for_storage:
                 # If no final answer at all, provide a generic completion message

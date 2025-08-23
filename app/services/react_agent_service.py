@@ -375,54 +375,125 @@ Always provide clear and helpful responses. When using tools, explain what you'r
             chart_data_collected = None
             chart_data_sent = False
 
-            # Stream response from LangGraph agent
-            async for chunk in agent.astream(agent_input):
-                logger.info(f"LangGraph chunk keys: {list(chunk.keys()) if isinstance(chunk, dict) else type(chunk)}")
+            # Stream response from LangGraph agent using astream_events for real-time streaming
+            async for event in agent.astream_events(agent_input, version="v2"):
+                event_type = event.get("event", "")
+                event_name = event.get("name", "")
+                event_data = event.get("data", {})
                 
-                # LangGraph chunks have different structures depending on the node
-                # Look for the final messages in the chunk
-                node_messages = []
+                logger.info(f"LangGraph event: {event_type} - {event_name}")  # Changed to INFO for better visibility
                 
-                # Different ways LangGraph can structure chunks:
-                for key in chunk.keys() if isinstance(chunk, dict) else []:
-                    if isinstance(chunk[key], dict) and "messages" in chunk[key]:
-                        node_messages.extend(chunk[key]["messages"])
-                    elif key == "messages":
-                        node_messages.extend(chunk[key])
-                
-                # Process all messages found in this chunk
-                for message_chunk in node_messages:
-                    if hasattr(message_chunk, "content") and message_chunk.content:
-                        content = message_chunk.content
-                        
-                        # Check message type to determine if it's tool output or AI response
-                        message_type = getattr(message_chunk, "type", "")
-                        message_name = getattr(message_chunk, "name", "")
-                        
-                        if message_type == "tool" or message_name:
-                            # This is tool output - treat as thinking
-                            tool_name = message_name or "tool"
-                            accumulated_thinking += f"{tool_name}: {content}\n"
+                # Handle tool execution completion
+                if event_type == "on_tool_end":
+                    tool_output = event_data.get("output", "")
+                    tool_name = event_name
+                    
+                    # Convert tool output to string safely
+                    tool_output_str = ""
+                    try:
+                        if isinstance(tool_output, str):
+                            tool_output_str = tool_output
+                        elif hasattr(tool_output, 'content'):
+                            # Tool output has content attribute - this is likely the case
+                            tool_output_str = tool_output.content
+                        else:
+                            tool_output_str = str(tool_output)
+                    except Exception as e:
+                        logger.error(f"Error converting tool output to string: {e}")
+                        logger.error(f"Tool output type: {type(tool_output)}, attributes: {dir(tool_output) if hasattr(tool_output, '__dict__') else 'No attributes'}")
+                        tool_output_str = "Tool output could not be serialized"
+                    
+                    accumulated_thinking += f"{tool_name}: {tool_output_str}\n"
+                    
+                    if tool_name == "generate_chart" and tool_output_str:
+                        try:
+                            # Parse chart data from string output
+                            logger.info(f"Chart tool output type: {type(tool_output_str)}")
+                            logger.info(f"Chart tool output content (first 500 chars): {tool_output_str[:500]}...")
                             
-                            if tool_name == "generate_chart":
-                                try:
-                                    chart_data_collected = json.loads(content) if isinstance(content, str) else content
-                                except Exception as e:
-                                    logger.error(f"Error parsing chart data: {e}")
+                            # Check if output is already a valid JSON string or needs parsing
+                            if isinstance(tool_output_str, str) and tool_output_str.strip():
+                                chart_data_collected = json.loads(tool_output_str.strip())
+                            else:
+                                chart_data_collected = tool_output_str
                             
-                            yield f"data: {json.dumps({'type': 'thinking', 'content': f'{tool_name}: {content[:200]}...', 'done': False, 'conversation_id': conversation_id})}\n\n"
-                        
-                        elif message_type == "ai" or message_type == "assistant" or not message_type:
-                            # This is AI response - treat as final answer
-                            accumulated_answer += content
-                            final_answer_for_storage += content
+                            logger.info(f"Chart data successfully parsed: {type(chart_data_collected)}")
                             
-                            # Send chart data first if we have it and haven't sent it
-                            if chart_data_collected and not chart_data_sent:
-                                yield f"data: {json.dumps({'type': 'chart', 'content': chart_data_collected, 'done': False, 'conversation_id': conversation_id})}\n\n"
+                            # Send chart data immediately after tool completion
+                            try:
+                                # Test serialization first
+                                test_serialize = json.dumps(chart_data_collected)
+                                chart_json_str = json.dumps({'type': 'chart', 'content': chart_data_collected, 'done': False, 'conversation_id': conversation_id})
+                                yield f"data: {chart_json_str}\n\n"
                                 chart_data_sent = True
-                            
-                            yield f"data: {json.dumps({'type': 'answer', 'content': content, 'done': False, 'conversation_id': conversation_id})}\n\n"
+                                logger.info("Chart data sent successfully to client")
+                            except (TypeError, ValueError) as e:
+                                logger.error(f"Error serializing chart data: {e}")
+                                logger.error(f"Chart data content that failed: {str(chart_data_collected)[:200]}...")
+                                yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart data generated but could not be serialized for display', 'done': False, 'conversation_id': conversation_id})}\n\n"
+                                
+                            yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart generated successfully!', 'done': False, 'conversation_id': conversation_id})}\n\n"
+                        except json.JSONDecodeError as e:
+                            logger.error(f"Error parsing chart JSON data: {e}")
+                            logger.error(f"Raw tool output that failed to parse: {tool_output_str}")
+                            yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart generation completed', 'done': False, 'conversation_id': conversation_id})}\n\n"
+                        except Exception as e:
+                            logger.error(f"Error processing chart data: {e}")
+                            logger.error(f"Raw tool output: {tool_output_str}")
+                            yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart generation completed', 'done': False, 'conversation_id': conversation_id})}\n\n"
+                    else:
+                        # Other tool outputs
+                        yield f"data: {json.dumps({'type': 'thinking', 'content': f'{tool_name}: {tool_output_str[:200]}...', 'done': False, 'conversation_id': conversation_id})}\n\n"
+                
+                # Handle LLM streaming tokens
+                elif event_type == "on_chat_model_stream":
+                    chunk_data = event_data.get("chunk", {})
+                    # Check if chunk_data has content - could be dict or object
+                    content = ""
+                    if hasattr(chunk_data, 'content'):
+                        content = getattr(chunk_data, 'content', '')
+                    elif isinstance(chunk_data, dict) and 'content' in chunk_data:
+                        content = chunk_data['content']
+                    
+                    if content:
+                        accumulated_answer += content
+                        final_answer_for_storage += content
+                        
+                        # Send chart data first if we have it and haven't sent it
+                        if chart_data_collected and not chart_data_sent:
+                            try:
+                                chart_json_str = json.dumps({'type': 'chart', 'content': chart_data_collected, 'done': False, 'conversation_id': conversation_id})
+                                yield f"data: {chart_json_str}\n\n"
+                                chart_data_sent = True
+                            except (TypeError, ValueError) as e:
+                                logger.error(f"Error serializing chart data: {e}")
+                                # Send a simplified chart notification instead
+                                yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart data generated but could not be serialized', 'done': False, 'conversation_id': conversation_id})}\n\n"
+                                chart_data_sent = True
+                        
+                        yield f"data: {json.dumps({'type': 'answer', 'content': content, 'done': False, 'conversation_id': conversation_id})}\n\n"
+                
+                # Handle agent completion to capture any final content
+                elif event_type == "on_chain_end" and event_name == "agent":
+                    output_data = event_data.get("output", {})
+                    if "messages" in output_data:
+                        last_message = output_data["messages"][-1] if output_data["messages"] else None
+                        if last_message and hasattr(last_message, 'content'):
+                            # If we haven't captured any answer content yet, use the final message
+                            if not final_answer_for_storage:
+                                final_answer_for_storage = last_message.content
+                                yield f"data: {json.dumps({'type': 'answer', 'content': last_message.content, 'done': False, 'conversation_id': conversation_id})}\n\n"
+
+            # Send any remaining chart data that hasn't been sent yet
+            if chart_data_collected and not chart_data_sent:
+                logger.info("Sending chart data at completion phase")
+                try:
+                    chart_json_str = json.dumps({'type': 'chart', 'content': chart_data_collected, 'done': False, 'conversation_id': conversation_id})
+                    yield f"data: {chart_json_str}\n\n"
+                    chart_data_sent = True
+                except (TypeError, ValueError) as e:
+                    logger.error(f"Error serializing chart data at completion: {e}")
+                    yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart data generated but could not be serialized', 'done': False, 'conversation_id': conversation_id})}\n\n"
 
             # Handle final completion  
             if not final_answer_for_storage:
@@ -451,7 +522,13 @@ Always provide clear and helpful responses. When using tools, explain what you'r
                 # Include chart data in document context if available
                 combined_context_info = document_context_info or {}
                 if chart_data_collected:
-                    combined_context_info["chart_data"] = chart_data_collected
+                    try:
+                        # Test if chart data can be serialized
+                        json.dumps(chart_data_collected)
+                        combined_context_info["chart_data"] = chart_data_collected
+                    except (TypeError, ValueError) as e:
+                        logger.error(f"Chart data cannot be serialized for database storage: {e}")
+                        combined_context_info["chart_data"] = {"error": "Chart data could not be serialized"}
 
                 self._save_conversation_and_messages_to_db(
                     conversation_id,

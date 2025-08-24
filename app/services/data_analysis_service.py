@@ -2,7 +2,7 @@ import pandas as pd
 import plotly.express as px
 import json
 import logging
-from typing import List
+from typing import List, Optional
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langchain_experimental.agents import create_pandas_dataframe_agent
@@ -12,43 +12,6 @@ from app.models import Document, DocumentType
 import os
 
 logger = logging.getLogger(__name__)
-
-
-def _extract_data_from_description(description: str) -> tuple:
-    """
-    Extract x_data and y_data from data description text.
-
-    Args:
-        description: Text description containing data like "produk Laptop (10), Mouse (50), Keyboard (25)"
-
-    Returns:
-        tuple: (x_data, y_data) lists
-    """
-    import re
-
-    try:
-        # Pattern to match "name (number)" or "name: number"
-        pattern = r"(\w+)\s*[\(:]\s*(\d+)\s*[)\)]?"
-        matches = re.findall(pattern, description)
-
-        if matches:
-            x_data = [match[0] for match in matches]
-            y_data = [int(match[1]) for match in matches]
-            return x_data, y_data
-
-        # Alternative pattern for "name = number" or "name - number"
-        pattern2 = r"(\w+)\s*[=-]\s*(\d+)"
-        matches2 = re.findall(pattern2, description)
-
-        if matches2:
-            x_data = [match[0] for match in matches2]
-            y_data = [int(match[1]) for match in matches2]
-            return x_data, y_data
-
-    except Exception as e:
-        logger.error(f"Error extracting data from description: {e}")
-
-    return None, None
 
 
 @tool
@@ -184,103 +147,95 @@ def analyze_dataframe(query: str) -> str:
 
 @tool
 def generate_chart(
-    data_description: str, chart_type: str = "bar", chart_config: str = "{}"
+    x_data: List,
+    y_data: List,
+    chart_type: str = "bar",
+    title: str = "Chart",
+    x_label: str = "X Axis",
+    y_label: str = "Y Axis",
+    names: Optional[List] = None,
+    values: Optional[List] = None,
 ) -> str:
     """
-    Generate interactive Plotly chart from data analysis results.
+    Generate interactive Plotly chart with specified data and configuration.
 
     Args:
-        data_description: Description of the data to visualize
-        chart_type: Type of chart (bar, line, scatter, histogram, pie, box). Defaults to "bar"
-        chart_config: JSON string with chart configuration. Defaults to "{}"
+        x_data: List of x-axis data points (categories, labels, or numeric values)
+        y_data: List of y-axis data points (numeric values)
+        chart_type: Type of chart - "bar", "line", "scatter", "pie", "histogram", "box"
+        title: Chart title
+        x_label: Label for x-axis
+        y_label: Label for y-axis
+        names: List of names for pie chart segments (optional, defaults to x_data)
+        values: List of values for pie chart (optional, defaults to y_data)
 
     Returns:
         JSON string containing Plotly chart configuration
     """
     try:
-        # Parse chart configuration
-        config = json.loads(chart_config) if chart_config else {}
-
-        # Extract actual data from data_description
-        x_data, y_data = _extract_data_from_description(data_description)
-
-        # Use extracted data or fallback to config data
-        chart_x_data = (
-            config.get("x_data", x_data)
-            if x_data
-            else config.get("x_data", ["Category A", "Category B", "Category C"])
-        )
-        chart_y_data = (
-            config.get("y_data", y_data)
-            if y_data
-            else config.get("y_data", [10, 20, 15])
-        )
+        labels = {"x": x_label, "y": y_label}
 
         if chart_type.lower() == "bar":
-            # Build labels from config xaxis/yaxis or use defaults
-            labels = config.get("labels", {})
-            if "xaxis" in config and "title" in config["xaxis"]:
-                labels["x"] = config["xaxis"]["title"]
-            if "yaxis" in config and "title" in config["yaxis"]:
-                labels["y"] = config["yaxis"]["title"]
-            if not labels:
-                labels = {"x": "Categories", "y": "Values"}
-
             fig = px.bar(
-                x=chart_x_data,
-                y=chart_y_data,
-                title=config.get("title", "Bar Chart"),
+                x=x_data,
+                y=y_data,
+                title=title,
                 labels=labels,
             )
 
         elif chart_type.lower() == "line":
-            line_x_data = (
-                chart_x_data
-                if (chart_x_data and isinstance(chart_x_data[0], (int, float)))
-                else list(range(len(chart_x_data) if chart_x_data else 3))
-            )
             fig = px.line(
-                x=config.get("x_data", line_x_data),
-                y=config.get("y_data", chart_y_data),
-                title=config.get("title", "Line Chart"),
-                labels=config.get("labels", {"x": "Time", "y": "Values"}),
+                x=x_data,
+                y=y_data,
+                title=title,
+                labels=labels,
             )
 
         elif chart_type.lower() == "scatter":
-            scatter_x_data = (
-                chart_x_data
-                if (chart_x_data and isinstance(chart_x_data[0], (int, float)))
-                else list(range(len(chart_x_data) if chart_x_data else 3))
-            )
             fig = px.scatter(
-                x=config.get("x_data", scatter_x_data),
-                y=config.get("y_data", chart_y_data),
-                title=config.get("title", "Scatter Plot"),
-                labels=config.get("labels", {"x": "X Values", "y": "Y Values"}),
+                x=x_data,
+                y=y_data,
+                title=title,
+                labels=labels,
             )
 
         elif chart_type.lower() == "pie":
+            pie_names = names if names is not None else x_data
+            pie_values = values if values is not None else y_data
             fig = px.pie(
-                values=config.get("values", chart_y_data),
-                names=config.get("names", chart_x_data),
-                title=config.get("title", "Pie Chart"),
+                values=pie_values,
+                names=pie_names,
+                title=title,
+            )
+
+        elif chart_type.lower() == "histogram":
+            fig = px.histogram(
+                x=x_data,
+                title=title,
+                labels={"x": x_label, "count": "Frequency"},
+            )
+
+        elif chart_type.lower() == "box":
+            fig = px.box(
+                y=y_data,
+                title=title,
+                labels={"y": y_label},
             )
 
         else:
-            # Default to bar chart with extracted data
             fig = px.bar(
-                x=chart_x_data, y=chart_y_data, title=config.get("title", "Chart")
+                x=x_data,
+                y=y_data,
+                title=title,
+                labels=labels,
             )
 
-        # Convert to JSON
         chart_json = fig.to_json()
 
-        # Wrap in response format expected by client
         response = {
             "chart_data": json.loads(chart_json) if chart_json else None,
             "chart_type": chart_type,
-            "description": data_description,
-            "config": config,
+            "title": title,
         }
 
         return json.dumps(response)

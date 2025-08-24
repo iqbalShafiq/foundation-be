@@ -3,6 +3,7 @@ import uuid
 import logging
 from typing import AsyncGenerator, Dict, List, Optional
 from langchain_openai import ChatOpenAI
+from langchain.globals import set_debug, set_verbose
 from langgraph.prebuilt import create_react_agent
 from langchain.memory import ConversationBufferWindowMemory
 from app.models import (
@@ -17,6 +18,9 @@ from app.database import get_db
 from app.services.data_analysis_service import DataAnalysisService
 
 logger = logging.getLogger(__name__)
+
+set_debug(True)
+set_verbose(True)
 
 
 class ReactAgentService:
@@ -36,6 +40,7 @@ class ReactAgentService:
         actual_model = self.MODEL_MAPPING[model_type]
         return ChatOpenAI(
             model=actual_model,
+            verbose=True,
             temperature=0.7,
             streaming=True,
         )
@@ -380,20 +385,20 @@ class ReactAgentService:
                 event_type = event.get("event", "")
                 event_name = event.get("name", "")
                 event_data = event.get("data", {})
-                
+
                 logger.debug(f"LangGraph event: {event_type} - {event_name}")
-                
+
                 # Handle tool execution completion
                 if event_type == "on_tool_end":
                     tool_output = event_data.get("output", "")
                     tool_name = event_name
-                    
+
                     # Convert tool output to string safely
                     tool_output_str = ""
                     try:
                         if isinstance(tool_output, str):
                             tool_output_str = tool_output
-                        elif hasattr(tool_output, 'content'):
+                        elif hasattr(tool_output, "content"):
                             # Tool output has content attribute - this is likely the case
                             tool_output_str = tool_output.content
                         else:
@@ -401,26 +406,38 @@ class ReactAgentService:
                     except Exception as e:
                         logger.error(f"Error converting tool output to string: {e}")
                         tool_output_str = "Tool output could not be serialized"
-                    
+
                     accumulated_thinking += f"{tool_name}: {tool_output_str}\n"
-                    
+
                     if tool_name == "generate_chart" and tool_output_str:
                         try:
                             # Parse chart data from string output
-                            if isinstance(tool_output_str, str) and tool_output_str.strip():
-                                chart_data_collected = json.loads(tool_output_str.strip())
+                            if (
+                                isinstance(tool_output_str, str)
+                                and tool_output_str.strip()
+                            ):
+                                chart_data_collected = json.loads(
+                                    tool_output_str.strip()
+                                )
                             else:
                                 chart_data_collected = tool_output_str
-                            
+
                             # Send chart data immediately after tool completion
                             try:
-                                chart_json_str = json.dumps({'type': 'chart', 'content': chart_data_collected, 'done': False, 'conversation_id': conversation_id})
+                                chart_json_str = json.dumps(
+                                    {
+                                        "type": "chart",
+                                        "content": chart_data_collected,
+                                        "done": False,
+                                        "conversation_id": conversation_id,
+                                    }
+                                )
                                 yield f"data: {chart_json_str}\n\n"
                                 chart_data_sent = True
                             except (TypeError, ValueError) as e:
                                 logger.error(f"Error serializing chart data: {e}")
                                 yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart data generated but could not be serialized for display', 'done': False, 'conversation_id': conversation_id})}\n\n"
-                                
+
                             yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart generated successfully!', 'done': False, 'conversation_id': conversation_id})}\n\n"
                         except json.JSONDecodeError as e:
                             logger.error(f"Error parsing chart JSON data: {e}")
@@ -431,25 +448,32 @@ class ReactAgentService:
                     else:
                         # Other tool outputs
                         yield f"data: {json.dumps({'type': 'thinking', 'content': f'{tool_name}: {tool_output_str[:200]}...', 'done': False, 'conversation_id': conversation_id})}\n\n"
-                
+
                 # Handle LLM streaming tokens
                 elif event_type == "on_chat_model_stream":
                     chunk_data = event_data.get("chunk", {})
                     # Check if chunk_data has content - could be dict or object
                     content = ""
-                    if hasattr(chunk_data, 'content'):
-                        content = getattr(chunk_data, 'content', '')
-                    elif isinstance(chunk_data, dict) and 'content' in chunk_data:
-                        content = chunk_data['content']
-                    
+                    if hasattr(chunk_data, "content"):
+                        content = getattr(chunk_data, "content", "")
+                    elif isinstance(chunk_data, dict) and "content" in chunk_data:
+                        content = chunk_data["content"]
+
                     if content:
                         accumulated_answer += content
                         final_answer_for_storage += content
-                        
+
                         # Send chart data first if we have it and haven't sent it
                         if chart_data_collected and not chart_data_sent:
                             try:
-                                chart_json_str = json.dumps({'type': 'chart', 'content': chart_data_collected, 'done': False, 'conversation_id': conversation_id})
+                                chart_json_str = json.dumps(
+                                    {
+                                        "type": "chart",
+                                        "content": chart_data_collected,
+                                        "done": False,
+                                        "conversation_id": conversation_id,
+                                    }
+                                )
                                 yield f"data: {chart_json_str}\n\n"
                                 chart_data_sent = True
                             except (TypeError, ValueError) as e:
@@ -457,15 +481,19 @@ class ReactAgentService:
                                 # Send a simplified chart notification instead
                                 yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart data generated but could not be serialized', 'done': False, 'conversation_id': conversation_id})}\n\n"
                                 chart_data_sent = True
-                        
+
                         yield f"data: {json.dumps({'type': 'answer', 'content': content, 'done': False, 'conversation_id': conversation_id})}\n\n"
-                
+
                 # Handle agent completion to capture any final content
                 elif event_type == "on_chain_end" and event_name == "agent":
                     output_data = event_data.get("output", {})
                     if "messages" in output_data:
-                        last_message = output_data["messages"][-1] if output_data["messages"] else None
-                        if last_message and hasattr(last_message, 'content'):
+                        last_message = (
+                            output_data["messages"][-1]
+                            if output_data["messages"]
+                            else None
+                        )
+                        if last_message and hasattr(last_message, "content"):
                             # If we haven't captured any answer content yet, use the final message
                             if not final_answer_for_storage:
                                 final_answer_for_storage = last_message.content
@@ -474,22 +502,33 @@ class ReactAgentService:
             # Send any remaining chart data that hasn't been sent yet
             if chart_data_collected and not chart_data_sent:
                 try:
-                    chart_json_str = json.dumps({'type': 'chart', 'content': chart_data_collected, 'done': False, 'conversation_id': conversation_id})
+                    chart_json_str = json.dumps(
+                        {
+                            "type": "chart",
+                            "content": chart_data_collected,
+                            "done": False,
+                            "conversation_id": conversation_id,
+                        }
+                    )
                     yield f"data: {chart_json_str}\n\n"
                     chart_data_sent = True
                 except (TypeError, ValueError) as e:
                     logger.error(f"Error serializing chart data at completion: {e}")
                     yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart data generated but could not be serialized', 'done': False, 'conversation_id': conversation_id})}\n\n"
 
-            # Handle final completion  
+            # Handle final completion
             if not final_answer_for_storage:
                 if chart_data_collected:
-                    final_answer_for_storage = "I've generated the requested chart for you."
+                    final_answer_for_storage = (
+                        "I've generated the requested chart for you."
+                    )
                 elif accumulated_thinking:
                     final_answer_for_storage = accumulated_thinking
                 else:
                     # This shouldn't happen with proper LangGraph usage
-                    logger.warning("No content captured from LangGraph agent - this may indicate a structure issue")
+                    logger.warning(
+                        "No content captured from LangGraph agent - this may indicate a structure issue"
+                    )
                     final_answer_for_storage = "I apologize, but I wasn't able to generate a proper response. Please try again."
 
             # Clean up the final answer
@@ -513,8 +552,12 @@ class ReactAgentService:
                         json.dumps(chart_data_collected)
                         combined_context_info["chart_data"] = chart_data_collected
                     except (TypeError, ValueError) as e:
-                        logger.error(f"Chart data cannot be serialized for database storage: {e}")
-                        combined_context_info["chart_data"] = {"error": "Chart data could not be serialized"}
+                        logger.error(
+                            f"Chart data cannot be serialized for database storage: {e}"
+                        )
+                        combined_context_info["chart_data"] = {
+                            "error": "Chart data could not be serialized"
+                        }
 
                 self._save_conversation_and_messages_to_db(
                     conversation_id,

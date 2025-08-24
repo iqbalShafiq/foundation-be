@@ -463,6 +463,7 @@ class ReactAgentService:
                     if just_thinking:
                         final_answer_for_storage = ""
                         just_thinking = False
+                        yield f"data: {json.dumps({'type': 'reset', 'content': '', 'done': False, 'conversation_id': conversation_id})}\n\n"
 
                     chunk_data = event_data.get("chunk", {})
                     # Check if chunk_data has content - could be dict or object

@@ -108,7 +108,7 @@ async def chat(
 
     return StreamingResponse(
         chat_router_service.route_chat_request(
-            message, model, conversation_id, cast(int, current_user.id), image_data_list, context_sources, context_collection
+            message, model, conversation_id, cast(int, current_user.id), image_data_list, context_sources, context_collection, parsed_document_ids
         ),
         media_type="text/plain",
         headers={

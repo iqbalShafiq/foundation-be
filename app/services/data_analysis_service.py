@@ -4,7 +4,12 @@ import json
 import logging
 from typing import List
 from langchain_core.tools import tool
-import io
+from langchain_openai import ChatOpenAI
+from langchain_experimental.agents import create_pandas_dataframe_agent
+from app.services.react_agent_context import get_current_context
+from app.database import SessionLocal
+from app.models import Document, DocumentType
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +55,7 @@ def _extract_data_from_description(description: str) -> tuple:
 def analyze_dataframe(query: str) -> str:
     """
     Analyze CSV/Excel data using pandas based on natural language query.
+    Uses LangChain's pandas dataframe agent for real data analysis.
 
     Args:
         query: Natural language question about the data
@@ -58,32 +64,117 @@ def analyze_dataframe(query: str) -> str:
         Analysis results as formatted string
     """
     try:
-        # For now, simulate data analysis since we don't have real file loading
-        # In production, this would load actual CSV/Excel files
+        # Get document context from ReactAgent runtime context
+        context = get_current_context()
 
-        # Return simulated analysis result
-        return f"""
-            Data Analysis Results for query: "{query}"
+        if not context:
+            return "Error: No document context available. Please ensure documents are selected in the chat."
 
-            📊 Simulated Analysis:
-            - Query processed successfully
-            - Found sample data patterns
-            - Statistical summary: 
-            * Mean: 150.5
-            * Count: 100 rows
-            * Categories: Sales, Marketing, Development
+        user_id = context.get("user_id")
+        selected_document_ids = context.get("selected_document_ids", [])
 
-            📈 Key Insights:
-            - Sales trend shows 15% growth
-            - Top performing category: Sales (45%)
-            - Recommended action: Focus on high-performing segments
+        if not user_id:
+            return "Error: No user context available."
 
-            Note: This is a simulated response. In production, this tool would:
-            1. Load actual CSV/Excel files from document context
-            2. Create pandas DataFrame
-            3. Execute data analysis based on the query
-            4. Return real statistical results
+        db = SessionLocal()
+        try:
+            # Filter by selected document IDs if provided, otherwise get recent files
+            query_filter = [
+                Document.user_id == user_id,
+                Document.file_type.in_(
+                    [DocumentType.CSV.value, DocumentType.XLSX.value]
+                ),
+                Document.processing_status == "completed",
+            ]
+
+            if selected_document_ids:
+                query_filter.append(Document.id.in_(selected_document_ids))
+                docs = db.query(Document).filter(*query_filter).all()
+                logger.info(
+                    f"Filtering by selected document IDs: {selected_document_ids}"
+                )
+            else:
+                docs = (
+                    db.query(Document)
+                    .filter(*query_filter)
+                    .order_by(Document.created_at.desc())
+                    .limit(3)
+                    .all()
+                )
+                logger.info(
+                    "No specific documents selected, using recent CSV/Excel files"
+                )
+
+            # Load first available file
+            df = None
+            data_source = "no data"
+
+            for doc in docs:
+                try:
+                    if os.path.exists(str(doc.file_path)):
+                        if str(doc.file_type) == DocumentType.CSV.value:
+                            df = pd.read_csv(str(doc.file_path))
+                        else:  # Excel file
+                            df = pd.read_excel(str(doc.file_path))
+                        data_source = f"file: {doc.original_filename}"
+                        logger.info(
+                            f"Loaded DataFrame from {doc.original_filename} with shape: {df.shape}"
+                        )
+                        break
+                except Exception as load_error:
+                    logger.warning(
+                        f"Failed to load {doc.original_filename}: {load_error}"
+                    )
+                    continue
+
+        finally:
+            db.close()
+
+        if df is None or df.empty:
+            return "No CSV/Excel files found. Please upload and select CSV or Excel files in the document context."
+
+        # Use LangChain pandas agent for analysis
+        llm = ChatOpenAI(
+            model="gpt-4.1-mini",
+            temperature=0.1,
+        )
+
+        agent_executor = create_pandas_dataframe_agent(
+            llm=llm,
+            df=df,
+            verbose=True,
+            allow_dangerous_code=True,
+            agent_type="tool-calling",
+            max_iterations=5,
+            early_stopping_method="generate",
+        )
+
+        # Execute query
+        df_info = f"""
+        DataFrame Info:
+        - Data Source: {data_source}
+        - Shape: {df.shape}
+        - Columns: {list(df.columns)}
+        
+        Sample Data:
+        {df.head().to_string()}
+        
+        User Query: {query}
         """
+
+        result = agent_executor.invoke({"input": df_info})
+
+        analysis_result = f"""
+        📊 Data Analysis Results for: "{query}"
+        
+        Dataset: {data_source}
+        Rows: {len(df)} | Columns: {len(df.columns)}
+        
+        {result.get("output", "No output generated")}
+        """
+
+        logger.info(f"Successfully analyzed dataframe with query: {query}")
+        return analysis_result
 
     except Exception as e:
         logger.error(f"Error in analyze_dataframe: {e}")
@@ -185,7 +276,7 @@ def generate_chart(
 
         # Wrap in response format expected by client
         response = {
-            "chart_data": json.loads(chart_json),
+            "chart_data": json.loads(chart_json) if chart_json else None,
             "chart_type": chart_type,
             "description": data_description,
             "config": config,
@@ -207,70 +298,3 @@ class DataAnalysisService:
     def get_analysis_tools() -> List:
         """Get list of available analysis tools for the React Agent"""
         return [analyze_dataframe, generate_chart]
-
-    @staticmethod
-    def load_dataframe_from_file(file_path: str, file_type: str) -> pd.DataFrame:
-        """
-        Load pandas dataframe from file
-
-        Args:
-            file_path: Path to the file
-            file_type: Type of file (csv, xlsx, xls)
-
-        Returns:
-            pandas DataFrame
-        """
-        try:
-            if file_type.lower() == "csv":
-                return pd.read_csv(file_path)
-            elif file_type.lower() in ["xlsx", "xls"]:
-                return pd.read_excel(file_path)
-            else:
-                raise ValueError(f"Unsupported file type: {file_type}")
-
-        except Exception as e:
-            logger.error(f"Error loading dataframe from {file_path}: {e}")
-            raise
-
-    @staticmethod
-    def format_dataframe_info(df: pd.DataFrame) -> str:
-        """
-        Format dataframe information for context
-
-        Args:
-            df: pandas DataFrame
-
-        Returns:
-            Formatted string with dataframe info
-        """
-        try:
-            # Get basic info
-            info_buffer = io.StringIO()
-            df.info(buf=info_buffer)
-            info_str = info_buffer.getvalue()
-
-            # Get sample data
-            sample_data = df.head().to_string()
-
-            # Get basic statistics
-            stats = (
-                df.describe().to_string()
-                if len(df.select_dtypes(include=["number"]).columns) > 0
-                else "No numeric columns for statistics"
-            )
-
-            formatted_info = f"""
-                DataFrame Information:
-                {info_str}
-
-                Sample Data (first 5 rows):
-                {sample_data}
-
-                Statistical Summary:
-                {stats}
-            """
-            return formatted_info
-
-        except Exception as e:
-            logger.error(f"Error formatting dataframe info: {e}")
-            return f"Error getting dataframe info: {str(e)}"

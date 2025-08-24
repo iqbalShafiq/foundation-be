@@ -56,7 +56,8 @@ class ChatRouterService:
         user_id: int | None = None,
         images: Optional[List[ImageData]] = None,
         context_sources: Optional[List[ContextSource]] = None,
-        collection_id: Optional[str] = None
+        collection_id: Optional[str] = None,
+        selected_document_ids: Optional[List[str]] = None
     ) -> AsyncGenerator[str, None]:
         """
         Route chat request to appropriate service based on context
@@ -69,6 +70,7 @@ class ChatRouterService:
             images: List of images
             context_sources: Document context sources
             collection_id: Collection ID
+            selected_document_ids: List of document IDs selected by user
             
         Yields:
             Streaming response chunks
@@ -89,7 +91,8 @@ class ChatRouterService:
                 user_id=user_id,
                 images=images,
                 context_sources=context_sources,
-                collection_id=collection_id
+                collection_id=collection_id,
+                selected_document_ids=selected_document_ids
             ):
                 yield chunk
         else:

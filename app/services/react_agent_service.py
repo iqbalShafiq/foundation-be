@@ -16,6 +16,7 @@ from app.models import (
 )
 from app.database import get_db
 from app.services.data_analysis_service import DataAnalysisService
+from app.services.react_agent_context import set_current_context
 
 logger = logging.getLogger(__name__)
 
@@ -161,12 +162,12 @@ class ReactAgentService:
             context_parts.append(source_text)
             current_length += len(source_text)
 
-        if context_parts:
-            context_prompt = "Based on the following documents:\n\n" + "".join(
-                context_parts
-            )
-            context_prompt += "Please answer the user's question using the information from these documents. If the documents don't contain relevant information, please say so."
-            return context_prompt
+        # if context_parts:
+        #     context_prompt = "Based on the following documents:\n\n" + "".join(
+        #         context_parts
+        #     )
+        #     context_prompt += "Please answer the user's question using the information from these documents. If the documents don't contain relevant information, please say so."
+        #     return context_prompt
 
         return ""
 
@@ -184,19 +185,19 @@ class ReactAgentService:
             You have access to powerful data analysis tools:
 
             1. analyze_dataframe: Use this tool when users ask questions about CSV or Excel data. This tool can:
-            - Load and analyze spreadsheet data
-            - Perform statistical operations
-            - Filter and group data
-            - Answer questions about data content and patterns
+            - Load and analyze CSV/Excel files from the user's uploaded documents
+            - Filter by document IDs selected by the user in the conversation context
+            - Perform statistical operations using pandas and LangChain agents
+            - Answer complex questions about data content using natural language
 
             2. generate_chart: Use this tool to create interactive visualizations. This tool can:
             - Generate various chart types (bar, line, scatter, pie, histogram, box plots)
             - Return charts as JSON data for interactive display
             - Customize chart appearance and labels
 
-            When users ask questions about data in uploaded CSV/Excel files, or request visualizations, use these tools appropriately. 
-
-            For CSV/Excel analysis questions, first use analyze_dataframe to understand the data, then optionally use generate_chart if visualization would be helpful.
+            When users ask questions about data in uploaded CSV/Excel files, use analyze_dataframe. 
+            This tool will automatically access the files based on the document context.
+            For visualizations, use generate_chart after getting analysis results.
 
             For normal conversations without data analysis needs, respond directly without using tools.
 
@@ -311,7 +312,7 @@ class ReactAgentService:
         # Get LLM
         llm = self.get_llm(model_type)
 
-        # Get tools
+        # Get tools - we'll enhance analyze_dataframe with context
         tools = DataAnalysisService.get_analysis_tools()
 
         # Build system prompt with context
@@ -334,10 +335,16 @@ class ReactAgentService:
         images: Optional[List[ImageData]] = None,
         context_sources: Optional[List[ContextSource]] = None,
         collection_id: Optional[str] = None,
+        selected_document_ids: Optional[List[str]] = None,
     ) -> AsyncGenerator[str, None]:
         try:
             if not conversation_id:
                 conversation_id = str(uuid.uuid4())
+
+            # Set context for tools to access
+            set_current_context(
+                user_id=user_id or 0, selected_document_ids=selected_document_ids
+            )
 
             # Memory
             memory = self.get_memory(conversation_id)

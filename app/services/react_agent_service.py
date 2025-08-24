@@ -30,16 +30,17 @@ class ReactAgentService:
         self._memories: Dict[str, ConversationBufferWindowMemory] = {}
 
     MODEL_MAPPING = {
-        ModelType.FAST: "gpt-4.1-mini",
-        ModelType.STANDARD: "gpt-4.1",
-        ModelType.FAST_REASONING: "o4-mini",
-        ModelType.REASONING: "o3",
+        ModelType.FAST: "google/gemini-2.0-flash-001",
+        ModelType.STANDARD: "anthropic/claude-sonnet-4",
+        ModelType.FAST_REASONING: "openai/o4-mini",
+        ModelType.REASONING: "openai/o3",
     }
 
     def get_llm(self, model_type: ModelType) -> ChatOpenAI:
         """Get ChatOpenAI instance for the specified model"""
         actual_model = self.MODEL_MAPPING[model_type]
         return ChatOpenAI(
+            base_url="https://openrouter.ai/api/v1",
             model=actual_model,
             verbose=True,
             temperature=0.7,
@@ -386,6 +387,7 @@ class ReactAgentService:
             accumulated_answer = ""
             chart_data_collected = None
             chart_data_sent = False
+            just_thinking = False
 
             # Stream response from LangGraph agent using astream_events for real-time streaming
             async for event in agent.astream_events(agent_input, version="v2"):
@@ -399,6 +401,7 @@ class ReactAgentService:
                 if event_type == "on_tool_end":
                     tool_output = event_data.get("output", "")
                     tool_name = event_name
+                    just_thinking = True
 
                     # Convert tool output to string safely
                     tool_output_str = ""
@@ -453,11 +456,14 @@ class ReactAgentService:
                             logger.error(f"Error processing chart data: {e}")
                             yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart generation completed', 'done': False, 'conversation_id': conversation_id})}\n\n"
                     else:
-                        # Other tool outputs
                         yield f"data: {json.dumps({'type': 'thinking', 'content': f'{tool_name}: {tool_output_str[:200]}...', 'done': False, 'conversation_id': conversation_id})}\n\n"
 
                 # Handle LLM streaming tokens
                 elif event_type == "on_chat_model_stream":
+                    if just_thinking:
+                        final_answer_for_storage = ""
+                        just_thinking = False
+
                     chunk_data = event_data.get("chunk", {})
                     # Check if chunk_data has content - could be dict or object
                     content = ""

@@ -135,8 +135,9 @@ def analyze_dataframe(query: str) -> str:
 
         # Use LangChain pandas agent for analysis
         llm = ChatOpenAI(
+            base_url="https://openrouter.ai/api/v1",
             model="gpt-4.1-mini",
-            temperature=0.1,
+            temperature=0,
         )
 
         agent_executor = create_pandas_dataframe_agent(

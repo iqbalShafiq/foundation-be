@@ -30,7 +30,7 @@ class ReactAgentService:
         self._memories: Dict[str, ConversationBufferWindowMemory] = {}
 
     MODEL_MAPPING = {
-        ModelType.FAST: "google/gemini-2.0-flash-001",
+        ModelType.FAST: "deepseek/deepseek-chat-v3.1",
         ModelType.STANDARD: "anthropic/claude-sonnet-4",
         ModelType.FAST_REASONING: "openai/o4-mini",
         ModelType.REASONING: "openai/o3",

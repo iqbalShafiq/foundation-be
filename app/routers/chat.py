@@ -171,3 +171,22 @@ async def get_conversation_detail(
             ],
         }
     )
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: str,
+    current_user: User = Depends(require_user_or_admin),
+    db: Session = Depends(get_db),
+):
+    """Delete a conversation and all its messages"""
+    conversation_service = ConversationService(db)
+    success = conversation_service.delete_conversation(
+        conversation_id=conversation_id,
+        user_id=cast(int, current_user.id)
+    )
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    return {"message": "Conversation deleted successfully"}

@@ -207,3 +207,26 @@ class ConversationService:
         )
         
         return conversation, messages
+
+    def delete_conversation(self, conversation_id: str, user_id: int) -> bool:
+        """Delete a conversation and all its messages"""
+        conversation = (
+            self.db.query(Conversation)
+            .filter(
+                Conversation.id == conversation_id,
+                Conversation.user_id == user_id
+            )
+            .first()
+        )
+        
+        if not conversation:
+            return False
+        
+        # Delete all messages first (due to foreign key constraint)
+        self.db.query(Message).filter(Message.conversation_id == conversation_id).delete()
+        
+        # Delete the conversation
+        self.db.delete(conversation)
+        self.db.commit()
+        
+        return True

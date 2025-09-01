@@ -100,10 +100,13 @@ class Conversation(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     title = Column(String, nullable=False)
     model_type = Column(String, nullable=False)
+    parent_conversation_id = Column(String, ForeignKey("conversations.id"), nullable=True, index=True)
+    edited_message_id = Column(Integer, nullable=True)  # Which message was edited to create this branch
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     user = relationship("User")
+    parent_conversation = relationship("Conversation", remote_side=[id], backref="child_conversations")
 
 
 class Message(Base):
@@ -115,6 +118,10 @@ class Message(Base):
     content = Column(Text, nullable=False)
     image_urls = Column(Text, nullable=True)  # JSON array of image URLs
     document_context = Column(Text, nullable=True)  # JSON object with document context info
+    # Branching fields
+    parent_message_id = Column(Integer, ForeignKey("messages.id"), nullable=True, index=True)
+    branch_id = Column(String, nullable=True, index=True)  # UUID for branch identification
+    is_active_branch = Column(Boolean, default=True)  # Whether this message is in the active branch
     # Token usage fields
     input_tokens = Column(Integer, nullable=True)  # Prompt/input tokens
     output_tokens = Column(Integer, nullable=True)  # Completion/output tokens
@@ -123,6 +130,7 @@ class Message(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     conversation = relationship("Conversation")
+    parent_message = relationship("Message", remote_side=[id], backref="child_messages")
 
 
 class Feedback(Base):
@@ -146,6 +154,9 @@ class ConversationResponse(BaseModel):
     created_at: str
     updated_at: str
     message_count: int
+    parent_conversation_id: Optional[str] = None
+    edited_message_id: Optional[int] = None
+    is_branch: Optional[bool] = False  # True if this is a branched conversation
     related_chats: Optional[List['MessageResponse']] = None
 
     class Config:
@@ -170,6 +181,11 @@ class MessageResponse(BaseModel):
     image_urls: Optional[List[str]] = None
     document_context: Optional[MessageDocumentContext] = None
     chart_data: Optional[Dict] = None  # Chart data from generate_chart tool
+    # Branching fields
+    parent_message_id: Optional[int] = None
+    branch_id: Optional[str] = None
+    is_active_branch: Optional[bool] = True
+    has_branches: Optional[bool] = False  # Whether this message has alternative branches
     # Token usage fields
     input_tokens: Optional[int] = None
     output_tokens: Optional[int] = None
@@ -201,6 +217,9 @@ class ConversationDetailResponse(BaseModel):
     model_type: str
     created_at: str
     updated_at: str
+    parent_conversation_id: Optional[str] = None
+    edited_message_id: Optional[int] = None
+    is_branch: Optional[bool] = False
     messages: List[MessageResponse]
 
     class Config:
@@ -401,3 +420,27 @@ class ContextSource(BaseModel):
     chunk_text: str
     page_number: Optional[int]
     relevance_score: float
+
+
+class MessageEditRequest(BaseModel):
+    content: str
+
+
+class MessageEditResponse(BaseModel):
+    message_id: int
+    new_branch_id: str
+    conversation_id: str
+    regenerated_messages: List[MessageResponse]
+
+
+class MessageBranch(BaseModel):
+    branch_id: str
+    root_message_id: int
+    is_active: bool
+    created_at: str
+    message_count: int
+
+
+class ConversationBranchesResponse(BaseModel):
+    conversation_id: str
+    branches: List[MessageBranch]

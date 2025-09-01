@@ -150,7 +150,8 @@ async def get_conversation_detail(
     conversation_service = ConversationService(db)
     result = conversation_service.get_conversation_detail(
         conversation_id=conversation_id,
-        user_id=cast(int, current_user.id)
+        user_id=cast(int, current_user.id),
+        active_branch_only=True  # Only show active branch by default
     )
     
     if not result:
@@ -165,6 +166,9 @@ async def get_conversation_detail(
             "model_type": conversation.model_type,
             "created_at": conversation.created_at.isoformat(),
             "updated_at": conversation.updated_at.isoformat(),
+            "parent_conversation_id": getattr(conversation, 'parent_conversation_id', None),
+            "edited_message_id": getattr(conversation, 'edited_message_id', None),
+            "is_branch": bool(getattr(conversation, 'parent_conversation_id', None)),
             "messages": [
                 conversation_service._message_to_response(msg)
                 for msg in messages

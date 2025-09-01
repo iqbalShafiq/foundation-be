@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, func
+from sqlalchemy import or_, func, and_
 from typing import List, Optional
 import json
 from app.models import Conversation, Message, ConversationResponse, MessageResponse, MessageDocumentContext, DocumentContextInfo
@@ -109,10 +109,18 @@ class ConversationService:
         related_messages: Optional[List[Message]] = None
     ) -> ConversationResponse:
         """Convert Conversation model to ConversationResponse"""
-        # Get message count for this conversation
+        # Get message count for this conversation (active branch only)
         message_count = (
             self.db.query(func.count(Message.id))
-            .filter(Message.conversation_id == conversation.id)
+            .filter(
+                and_(
+                    Message.conversation_id == conversation.id,
+                    or_(
+                        Message.is_active_branch.is_(True),
+                        Message.is_active_branch.is_(None)  # For backward compatibility
+                    )
+                )
+            )
             .scalar()
         )
         
@@ -123,6 +131,9 @@ class ConversationService:
             "created_at": conversation.created_at.isoformat(),
             "updated_at": conversation.updated_at.isoformat(),
             "message_count": message_count,
+            "parent_conversation_id": getattr(conversation, 'parent_conversation_id', None),
+            "edited_message_id": getattr(conversation, 'edited_message_id', None),
+            "is_branch": bool(getattr(conversation, 'parent_conversation_id', None)),
         }
         
         if include_related:
@@ -174,6 +185,18 @@ class ConversationService:
             except (json.JSONDecodeError, ValueError):
                 image_urls = None
         
+        # Check if this message has branches (alternative versions)
+        has_branches = False
+        if hasattr(message, 'parent_message_id') and message.parent_message_id:
+            # Check if there are other messages with the same parent but different branch_id
+            sibling_count = self.db.query(func.count(Message.id)).filter(
+                and_(
+                    Message.parent_message_id == message.parent_message_id,
+                    Message.branch_id != message.branch_id
+                )
+            ).scalar()
+            has_branches = sibling_count > 0
+        
         return MessageResponse(
             id=message.id,
             role=message.role,
@@ -181,6 +204,11 @@ class ConversationService:
             image_urls=image_urls,
             document_context=document_context,
             chart_data=chart_data,
+            # Branching fields
+            parent_message_id=getattr(message, 'parent_message_id', None),
+            branch_id=getattr(message, 'branch_id', None),
+            is_active_branch=getattr(message, 'is_active_branch', True),
+            has_branches=has_branches,
             # Token usage fields
             input_tokens=getattr(message, 'input_tokens', None),
             output_tokens=getattr(message, 'output_tokens', None),
@@ -189,7 +217,7 @@ class ConversationService:
             created_at=message.created_at.isoformat()
         )
 
-    def get_conversation_detail(self, conversation_id: str, user_id: int):
+    def get_conversation_detail(self, conversation_id: str, user_id: int, active_branch_only: bool = True):
         """Get detailed conversation with full message history"""
         conversation = (
             self.db.query(Conversation)
@@ -203,15 +231,32 @@ class ConversationService:
         if not conversation:
             return None
             
-        # Get all messages for this conversation
-        messages = (
-            self.db.query(Message)
-            .filter(Message.conversation_id == conversation_id)
-            .order_by(Message.created_at.asc())
-            .all()
-        )
+        # Get messages for this conversation
+        query = self.db.query(Message).filter(Message.conversation_id == conversation_id)
+        
+        if active_branch_only:
+            # Only get active branch messages
+            query = query.filter(
+                or_(
+                    Message.is_active_branch.is_(True),
+                    Message.is_active_branch.is_(None)  # For backward compatibility
+                )
+            )
+        
+        messages = query.order_by(Message.created_at.asc()).all()
         
         return conversation, messages
+
+    def get_conversation_by_id(self, conversation_id: str, user_id: int) -> Optional[Conversation]:
+        """Get conversation by ID if it belongs to the user"""
+        return (
+            self.db.query(Conversation)
+            .filter(
+                Conversation.id == conversation_id,
+                Conversation.user_id == user_id
+            )
+            .first()
+        )
 
     def delete_conversation(self, conversation_id: str, user_id: int) -> bool:
         """Delete a conversation and all its messages"""

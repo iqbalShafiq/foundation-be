@@ -38,6 +38,7 @@ This is a FastAPI chatbot application with streaming support using LangChain and
 - Password hashing using bcrypt via passlib for security
 - ChatService singleton with lazy initialization of ChatOpenAI clients per model type
 - Model mapping: Fast→gpt-4.1-mini, Standard→gpt-4.1, Fast Reasoning→o4-mini, Reasoning→o3
+- **Message Branching System**: Supports editing messages with branch creation - when a user message is edited, a new branch is created and AI responses are regenerated while preserving original conversation history
 - Streaming responses use Server-Sent Events format with JSON data chunks
 - CORS middleware enabled for all origins with full credentials support
 - Custom exception handlers for validation errors and HTTP exceptions with user-friendly error mapping
@@ -56,6 +57,11 @@ This is a FastAPI chatbot application with streaming support using LangChain and
 - `POST /chat` - Chat with streaming responses (requires auth)
 - `GET /conversations` - Get user conversations with optional keyword search and related chats (requires auth)
 - `GET /conversations/{conversation_id}` - Get detailed conversation with message history (requires auth)
+
+**Messages (Message Editing & Branching):**
+- `PUT /messages/{message_id}` - Edit a user message and create new branch with regenerated AI responses (requires auth)
+- `GET /conversations/{conversation_id}/branches` - Get all branches for a conversation (requires auth)
+- `POST /conversations/{conversation_id}/branches/{branch_id}/activate` - Switch active branch for a conversation (requires auth)
 
 **Feedback:**
 - `POST /feedback` - Add feedback (like/dislike) with optional description for a message (requires auth)

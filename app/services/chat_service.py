@@ -1,9 +1,9 @@
 import json
 import uuid
 import logging
-from typing import AsyncGenerator, Dict, cast, List, Optional, Any, Union
+from typing import AsyncGenerator, Dict, cast, List, Optional, Any
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain.memory import ConversationBufferWindowMemory
 from langchain_community.callbacks import get_openai_callback
 from app.models import (
@@ -87,6 +87,28 @@ class ChatService:
         except Exception as e:
             logger.error(f"Error loading conversation history: {e}")
             # Don't fail if we can't load history - just continue with empty memory
+
+    def get_chat_response_sync(self, messages: List[Dict[str, str]], model_type: ModelType) -> str:
+        """Get non-streaming chat response for message regeneration"""
+        try:
+            # Get the appropriate model
+            llm = self.get_llm(model_type)
+            
+            # Convert to LangChain messages
+            langchain_messages = []
+            for msg in messages:
+                if msg["role"] == "user":
+                    langchain_messages.append(HumanMessage(content=msg["content"]))
+                elif msg["role"] == "assistant":
+                    langchain_messages.append(AIMessage(content=msg["content"]))
+            
+            # Get response
+            response = llm.invoke(langchain_messages)
+            return str(response.content)
+            
+        except Exception as e:
+            logger.error(f"Error getting chat response: {e}")
+            raise
 
     def _generate_conversation_title(self, message: str) -> str:
         """Generate a title from the first message"""
@@ -254,6 +276,9 @@ class ChatService:
                 db.merge(existing)
 
             # Save user message with image URLs and document context
+            # Generate new branch ID for new conversations or continue existing branch
+            branch_id = str(uuid.uuid4()) if not existing else None
+            
             user_msg = Message(
                 conversation_id=conversation_id,
                 role="user",
@@ -262,14 +287,20 @@ class ChatService:
                 document_context=json.dumps(document_context)
                 if document_context
                 else None,
+                branch_id=branch_id,
+                is_active_branch=True,
             )
             db.add(user_msg)
+            db.flush()  # Get the user message ID
 
             # Save AI message with token usage
-            ai_msg_data: Dict[str, Union[str, int, float, None]] = {
+            ai_msg_data = {
                 "conversation_id": conversation_id,
                 "role": "assistant", 
-                "content": ai_message
+                "content": ai_message,
+                "parent_message_id": user_msg.id,
+                "branch_id": branch_id,
+                "is_active_branch": True
             }
             
             # Add token usage if available

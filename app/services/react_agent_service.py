@@ -1,11 +1,12 @@
 import json
 import uuid
 import logging
-from typing import AsyncGenerator, Dict, List, Optional
+from typing import AsyncGenerator, Dict, List, Optional, Union
 from langchain_openai import ChatOpenAI
 from langchain.globals import set_debug, set_verbose
 from langgraph.prebuilt import create_react_agent
 from langchain.memory import ConversationBufferWindowMemory
+from langchain_core.callbacks import UsageMetadataCallbackHandler
 from app.models import (
     ModelType,
     Conversation,
@@ -253,6 +254,7 @@ class ReactAgentService:
         model_type: ModelType,
         image_urls: Optional[List[str]] = None,
         document_context: Optional[dict] = None,
+        token_usage: Optional[Dict] = None,
     ):
         """Save conversation and messages to database"""
         db = next(get_db())
@@ -290,10 +292,21 @@ class ReactAgentService:
             )
             db.add(user_msg)
 
-            # Save AI message
-            ai_msg = Message(
-                conversation_id=conversation_id, role="assistant", content=ai_message
-            )
+            # Save AI message with token usage
+            ai_msg_data: Dict[str, Union[str, int, float, None]] = {
+                "conversation_id": conversation_id,
+                "role": "assistant", 
+                "content": ai_message
+            }
+            
+            # Add token usage if available
+            if token_usage:
+                ai_msg_data["input_tokens"] = token_usage.get("input_tokens")
+                ai_msg_data["output_tokens"] = token_usage.get("output_tokens")
+                ai_msg_data["total_tokens"] = token_usage.get("total_tokens")
+                ai_msg_data["model_cost"] = token_usage.get("cost")
+            
+            ai_msg = Message(**ai_msg_data)
             db.add(ai_msg)
 
             db.commit()
@@ -388,9 +401,13 @@ class ReactAgentService:
             chart_data_collected = None
             chart_data_sent = False
             just_thinking = False
+            token_usage_data = None
+
+            # Create usage metadata callback handler for token tracking
+            usage_callback = UsageMetadataCallbackHandler()
 
             # Stream response from LangGraph agent using astream_events for real-time streaming
-            async for event in agent.astream_events(agent_input, version="v2"):
+            async for event in agent.astream_events(agent_input, version="v2", config={"callbacks": [usage_callback]}):
                 event_type = event.get("event", "")
                 event_name = event.get("name", "")
                 event_data = event.get("data", {})
@@ -548,6 +565,21 @@ class ReactAgentService:
             # Clean up the final answer
             final_answer_for_storage = final_answer_for_storage.strip()
 
+            # Capture token usage data after agent execution
+            try:
+                metadata = usage_callback.usage_metadata
+                if metadata:
+                    token_usage_data = {
+                        "input_tokens": getattr(metadata, 'input_tokens', None),
+                        "output_tokens": getattr(metadata, 'output_tokens', None),
+                        "total_tokens": getattr(metadata, 'total_tokens', None),
+                        "cost": None  # LangGraph doesn't provide cost directly
+                    }
+                    logger.info(f"Token usage captured: {token_usage_data}")
+            except Exception as e:
+                logger.error(f"Error capturing token usage: {e}")
+                token_usage_data = None
+
             # Send completion signal
             yield f"data: {json.dumps({'type': 'answer', 'content': '', 'done': True, 'conversation_id': conversation_id})}\n\n"
 
@@ -581,6 +613,7 @@ class ReactAgentService:
                     model_type,
                     image_urls,
                     combined_context_info if combined_context_info else None,
+                    token_usage_data,
                 )
 
         except Exception as e:

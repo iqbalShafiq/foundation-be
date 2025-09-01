@@ -181,6 +181,11 @@ class ConversationService:
             image_urls=image_urls,
             document_context=document_context,
             chart_data=chart_data,
+            # Token usage fields
+            input_tokens=getattr(message, 'input_tokens', None),
+            output_tokens=getattr(message, 'output_tokens', None),
+            total_tokens=getattr(message, 'total_tokens', None),
+            model_cost=getattr(message, 'model_cost', None),
             created_at=message.created_at.isoformat()
         )
 

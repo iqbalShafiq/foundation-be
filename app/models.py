@@ -3,7 +3,7 @@ from typing import Optional, List, Union, Dict
 import uuid
 from datetime import datetime
 from enum import Enum
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Float
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -115,6 +115,11 @@ class Message(Base):
     content = Column(Text, nullable=False)
     image_urls = Column(Text, nullable=True)  # JSON array of image URLs
     document_context = Column(Text, nullable=True)  # JSON object with document context info
+    # Token usage fields
+    input_tokens = Column(Integer, nullable=True)  # Prompt/input tokens
+    output_tokens = Column(Integer, nullable=True)  # Completion/output tokens
+    total_tokens = Column(Integer, nullable=True)  # Total tokens used
+    model_cost = Column(Float, nullable=True)  # Cost in USD (optional)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
     conversation = relationship("Conversation")
@@ -165,6 +170,11 @@ class MessageResponse(BaseModel):
     image_urls: Optional[List[str]] = None
     document_context: Optional[MessageDocumentContext] = None
     chart_data: Optional[Dict] = None  # Chart data from generate_chart tool
+    # Token usage fields
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
+    model_cost: Optional[float] = None
     created_at: str
 
     class Config:

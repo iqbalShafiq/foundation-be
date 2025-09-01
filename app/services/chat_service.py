@@ -1,10 +1,11 @@
 import json
 import uuid
 import logging
-from typing import AsyncGenerator, Dict, cast, List, Optional, Any
+from typing import AsyncGenerator, Dict, cast, List, Optional, Any, Union
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain.memory import ConversationBufferWindowMemory
+from langchain_community.callbacks import get_openai_callback
 from app.models import (
     ModelType,
     Conversation,
@@ -226,6 +227,7 @@ class ChatService:
         model_type: ModelType,
         image_urls: Optional[List[str]] = None,
         document_context: Optional[dict] = None,
+        token_usage: Optional[Dict[str, Any]] = None,
     ):
         """Save conversation and messages to database"""
         db = next(get_db())
@@ -263,10 +265,21 @@ class ChatService:
             )
             db.add(user_msg)
 
-            # Save AI message
-            ai_msg = Message(
-                conversation_id=conversation_id, role="assistant", content=ai_message
-            )
+            # Save AI message with token usage
+            ai_msg_data: Dict[str, Union[str, int, float, None]] = {
+                "conversation_id": conversation_id,
+                "role": "assistant", 
+                "content": ai_message
+            }
+            
+            # Add token usage if available
+            if token_usage:
+                ai_msg_data["input_tokens"] = token_usage.get("input_tokens")
+                ai_msg_data["output_tokens"] = token_usage.get("output_tokens")
+                ai_msg_data["total_tokens"] = token_usage.get("total_tokens")
+                ai_msg_data["model_cost"] = token_usage.get("cost")
+            
+            ai_msg = Message(**ai_msg_data)
             db.add(ai_msg)
 
             db.commit()
@@ -363,23 +376,34 @@ class ChatService:
 
             # Collect AI response content for memory storage
             ai_response_content = ""
+            token_usage_data = None
 
-            # Stream the response
-            async for chunk in llm.astream(messages):
-                if chunk.content:
-                    ai_response_content += cast(str, chunk.content)
-                    # Format as SSE (Server-Sent Events) with context metadata
-                    data = {
-                        "content": chunk.content,
-                        "done": False,
-                        "conversation_id": conversation_id,
-                    }
+            # Use OpenAI callback to track token usage
+            with get_openai_callback() as cb:
+                # Stream the response
+                async for chunk in llm.astream(messages):
+                    if chunk.content:
+                        ai_response_content += cast(str, chunk.content)
+                        # Format as SSE (Server-Sent Events) with context metadata
+                        data = {
+                            "content": chunk.content,
+                            "done": False,
+                            "conversation_id": conversation_id,
+                        }
 
-                    # Include context sources in the first chunk
-                    if context_metadata and ai_response_content == chunk.content:
-                        data["context_sources"] = context_metadata
+                        # Include context sources in the first chunk
+                        if context_metadata and ai_response_content == chunk.content:
+                            data["context_sources"] = context_metadata
 
-                    yield f"data: {json.dumps(data)}\n\n"
+                        yield f"data: {json.dumps(data)}\n\n"
+
+                # Capture token usage after streaming
+                token_usage_data = {
+                    "input_tokens": cb.prompt_tokens,
+                    "output_tokens": cb.completion_tokens,
+                    "total_tokens": cb.total_tokens,
+                    "cost": cb.total_cost
+                }
 
             # Save the conversation to memory
             memory.chat_memory.add_user_message(message)
@@ -397,6 +421,7 @@ class ChatService:
                     model_type,
                     image_urls,
                     document_context_info,
+                    token_usage_data,
                 )
 
             # Send final message

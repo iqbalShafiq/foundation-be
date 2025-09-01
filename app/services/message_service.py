@@ -36,10 +36,18 @@ class MessageService:
             
         # Create new conversation as a branch
         new_conversation_id = str(uuid.uuid4())
+        
+        # Create title with (Edited) suffix only if not already present
+        original_title = original_conversation.title
+        if not original_title.endswith(" (Edited)"):
+            new_title = f"{original_title} (Edited)"
+        else:
+            new_title = original_title
+        
         new_conversation = Conversation(
             id=new_conversation_id,
             user_id=user_id,
-            title=f"{original_conversation.title} (Edited)",
+            title=new_title,
             model_type=original_conversation.model_type,
             parent_conversation_id=original_conversation.id,
             edited_message_id=message_id

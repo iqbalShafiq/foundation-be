@@ -15,6 +15,7 @@ from app.models import (
     ContextSource,
 )
 from app.database import get_db
+from .token_aggregation_service import TokenAggregationService
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +315,15 @@ class ChatService:
             db.add(ai_msg)
 
             db.commit()
+            db.refresh(ai_msg)  # Refresh to get the actual datetime value
+            
+            # Update monthly token aggregation if message has token usage
+            if token_usage:
+                # Use current datetime since the message was just created
+                from datetime import datetime
+                TokenAggregationService.update_user_token_stats_for_new_message(
+                    db, user_id, datetime.now()
+                )
         except Exception as e:
             db.rollback()
             logger.error(f"Error saving conversation and messages: {e}")

@@ -3,7 +3,7 @@ from typing import Optional, List, Union, Dict
 import uuid
 from datetime import datetime
 from enum import Enum
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Float
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Float, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -62,13 +62,62 @@ class UserCreate(BaseModel):
     role: UserRole = UserRole.USER
 
 
+class MonthlyTokenStats(BaseModel):
+    month: str  # Format: YYYY-MM
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    total_cost: float
+    message_count: int
+
+
+class UserTokenStatsResponse(BaseModel):
+    monthly_stats: List[MonthlyTokenStats]
+    total_months: int
+    has_more: bool
+
+
+class DailyTokenStats(BaseModel):
+    date: str  # Format: YYYY-MM-DD
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    total_cost: float
+    message_count: int
+    conversation_count: int
+
+
+class MonthlyDailyBreakdownResponse(BaseModel):
+    month: str  # Format: YYYY-MM
+    daily_stats: List[DailyTokenStats]
+    total_days: int
+
+
+class ConversationTokenStats(BaseModel):
+    conversation_id: str
+    conversation_title: str
+    model_type: str
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    total_cost: float
+    message_count: int
+    last_message_at: str
+
+
+class DailyConversationBreakdownResponse(BaseModel):
+    date: str  # Format: YYYY-MM-DD
+    conversation_stats: List[ConversationTokenStats]
+    total_conversations: int
+
+
 class UserResponse(BaseModel):
     id: int
     username: str
     email: str
     role: str
     is_active: bool
-
+    token_stats: Optional[UserTokenStatsResponse] = None
 
     class Config:
         from_attributes = True
@@ -444,3 +493,27 @@ class MessageBranch(BaseModel):
 class ConversationBranchesResponse(BaseModel):
     conversation_id: str
     branches: List[MessageBranch]
+
+
+# Pre-computed monthly token usage table for performance
+class UserMonthlyTokenUsage(Base):
+    __tablename__ = "user_monthly_token_usage"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    year = Column(Integer, nullable=False, index=True)
+    month = Column(Integer, nullable=False, index=True)
+    input_tokens = Column(Integer, default=0)
+    output_tokens = Column(Integer, default=0)
+    total_tokens = Column(Integer, default=0)
+    total_cost = Column(Float, default=0.0)
+    message_count = Column(Integer, default=0)
+    last_updated = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    user = relationship("User")
+    
+    # Ensure unique constraint on user_id + year + month
+    __table_args__ = (
+        UniqueConstraint('user_id', 'year', 'month', name='unique_user_month'),
+    )

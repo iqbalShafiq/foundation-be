@@ -49,9 +49,13 @@ This is a FastAPI chatbot application with streaming support using LangChain and
 **Authentication:**
 - `POST /auth/register` - Register new user (username, email, password, role)
 - `POST /auth/login` - Login and get JWT token
-- `GET /auth/me` - Get current user info (requires auth)
+- `GET /auth/me` - Get current user info with optional token statistics (requires auth)
 - `GET /auth/users` - List all users (admin only)
 - `DELETE /auth/users/{user_id}` - Delete user (admin only)
+
+**Token Usage Analytics:**
+- `GET /auth/token-stats/monthly/{year}/{month}/daily` - Get daily breakdown within a specific month showing input/output per day (requires auth)
+- `GET /auth/token-stats/daily/{date}/conversations` - Get conversation-level breakdown for a specific day showing detailed input/output per conversation (requires auth)
 
 **Chat:**
 - `POST /chat` - Chat with streaming responses (requires auth)

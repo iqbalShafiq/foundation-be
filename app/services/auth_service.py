@@ -3,8 +3,10 @@ from typing import Optional, cast
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
+from sqlalchemy import func, extract
 from fastapi import HTTPException, status
-from ..models import User, UserCreate, UserUpdate, TokenData
+from ..models import User, UserCreate, UserUpdate, TokenData, Message, MonthlyTokenStats, UserTokenStatsResponse
+from .token_aggregation_service import TokenAggregationService
 import os
 from dotenv import load_dotenv
 
@@ -127,3 +129,64 @@ class AuthService:
         db.commit()
         db.refresh(user)
         return user
+
+    @staticmethod
+    def get_monthly_token_stats(db: Session, user_id: int, year: int, month: int) -> MonthlyTokenStats:
+        """Get aggregated token statistics for a user for a specific month"""
+        # Query messages where user owns the conversation and messages have token data
+        result = (
+            db.query(
+                func.sum(Message.input_tokens).label("total_input_tokens"),
+                func.sum(Message.output_tokens).label("total_output_tokens"), 
+                func.sum(Message.total_tokens).label("total_total_tokens"),
+                func.sum(Message.model_cost).label("total_cost"),
+                func.count(Message.id).label("message_count"),
+            )
+            .join(Message.conversation)  # Join with Conversation table
+            .filter(
+                Message.role == "assistant",  # Only count AI assistant messages for token usage
+                Message.input_tokens.isnot(None),  # Has token data
+                Message.conversation.has(user_id=user_id),  # User owns the conversation
+                extract('year', Message.created_at) == year,
+                extract('month', Message.created_at) == month,
+            )
+            .first()
+        )
+        
+        # Handle case where no data exists
+        input_tokens = result.total_input_tokens or 0
+        output_tokens = result.total_output_tokens or 0
+        total_tokens = result.total_total_tokens or 0
+        total_cost = float(result.total_cost or 0.0)
+        message_count = result.message_count or 0
+        
+        return MonthlyTokenStats(
+            month=f"{year:04d}-{month:02d}",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            total_cost=total_cost,
+            message_count=message_count,
+        )
+
+    @staticmethod
+    def get_user_token_stats(
+        db: Session, 
+        user_id: int, 
+        limit: int = 12,
+        from_year: Optional[int] = None,
+        from_month: Optional[int] = None
+    ) -> UserTokenStatsResponse:
+        """Get paginated monthly token statistics for a user (FAST VERSION)"""
+        
+        # Ensure current month is up-to-date for real-time accuracy
+        TokenAggregationService.ensure_current_month_updated(db, user_id)
+        
+        # Use the fast pre-computed method
+        return TokenAggregationService.get_user_token_stats_fast(
+            db=db,
+            user_id=user_id,
+            limit=limit,
+            from_year=from_year,
+            from_month=from_month
+        )

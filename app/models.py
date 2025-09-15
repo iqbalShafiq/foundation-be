@@ -517,3 +517,84 @@ class UserMonthlyTokenUsage(Base):
     __table_args__ = (
         UniqueConstraint('user_id', 'year', 'month', name='unique_user_month'),
     )
+
+
+# Model metadata from OpenRouter API
+class ModelMetadata(Base):
+    __tablename__ = "model_metadata"
+
+    id = Column(String, primary_key=True, index=True)  # model ID from OpenRouter
+    canonical_slug = Column(String, nullable=True, index=True)
+    hugging_face_id = Column(String, nullable=True)
+    name = Column(String, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    context_length = Column(Integer, nullable=True)
+    
+    # Architecture info
+    modality = Column(String, nullable=True)  # e.g., "text->text", "text+image->text"
+    input_modalities = Column(Text, nullable=True)  # JSON array
+    output_modalities = Column(Text, nullable=True)  # JSON array
+    tokenizer = Column(String, nullable=True)
+    instruct_type = Column(String, nullable=True)
+    
+    # Pricing info
+    prompt_price = Column(Float, nullable=True)  # Price per token for prompt
+    completion_price = Column(Float, nullable=True)  # Price per token for completion
+    request_price = Column(Float, nullable=True)  # Price per request
+    image_price = Column(Float, nullable=True)  # Price per image
+    web_search_price = Column(Float, nullable=True)  # Price for web search
+    internal_reasoning_price = Column(Float, nullable=True)  # Price for internal reasoning
+    input_cache_read_price = Column(Float, nullable=True)  # Price for input cache read
+    
+    # Provider info
+    provider_context_length = Column(Integer, nullable=True)
+    max_completion_tokens = Column(Integer, nullable=True)
+    is_moderated = Column(Boolean, default=False)
+    
+    # Additional metadata
+    supported_parameters = Column(Text, nullable=True)  # JSON array
+    per_request_limits = Column(Text, nullable=True)  # JSON object
+    
+    # Internal tracking
+    is_active = Column(Boolean, default=True)  # Whether model is currently available
+    last_updated = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# Pydantic models for API responses
+class ModelMetadataResponse(BaseModel):
+    id: str
+    canonical_slug: Optional[str]
+    hugging_face_id: Optional[str]
+    name: str
+    description: Optional[str]
+    context_length: Optional[int]
+    modality: Optional[str]
+    input_modalities: Optional[List[str]]
+    output_modalities: Optional[List[str]]
+    tokenizer: Optional[str]
+    instruct_type: Optional[str]
+    prompt_price: Optional[float]
+    completion_price: Optional[float]
+    request_price: Optional[float]
+    image_price: Optional[float]
+    web_search_price: Optional[float]
+    internal_reasoning_price: Optional[float]
+    input_cache_read_price: Optional[float]
+    provider_context_length: Optional[int]
+    max_completion_tokens: Optional[int]
+    is_moderated: Optional[bool]
+    supported_parameters: Optional[List[str]]
+    per_request_limits: Optional[Dict]
+    is_active: bool
+    last_updated: str
+    created_at: str
+
+    class Config:
+        from_attributes = True
+
+
+class ModelMetadataListResponse(BaseModel):
+    models: List[ModelMetadataResponse]
+    total_count: int
+    updated_at: str

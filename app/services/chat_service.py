@@ -26,7 +26,7 @@ class ChatService:
         self._memories: Dict[str, ConversationBufferWindowMemory] = {}
 
     MODEL_MAPPING = {
-        ModelType.FAST: "deepseek/deepseek-chat-v3.1",
+        ModelType.FAST: "google/gemini-2.5-flash",
         ModelType.STANDARD: "anthropic/claude-sonnet-4",
         ModelType.FAST_REASONING: "openai/o4-mini",
         ModelType.REASONING: "openai/o3",

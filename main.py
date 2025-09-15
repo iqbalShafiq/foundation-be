@@ -5,7 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
-from app.routers import chat, health, auth, feedback, preferences, gallery, documents, messages
+from app.routers import chat, health, auth, feedback, preferences, gallery, documents, messages, models
 from app.database import engine
 from app.models import Base
 
@@ -103,6 +103,7 @@ app.include_router(documents.router)
 app.include_router(gallery.router)
 app.include_router(feedback.router)
 app.include_router(preferences.router)
+app.include_router(models.router)
 app.include_router(health.router)
 
 if __name__ == "__main__":

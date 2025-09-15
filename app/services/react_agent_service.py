@@ -31,7 +31,7 @@ class ReactAgentService:
         self._memories: Dict[str, ConversationBufferWindowMemory] = {}
 
     MODEL_MAPPING = {
-        ModelType.FAST: "deepseek/deepseek-chat-v3.1",
+        ModelType.FAST: "google/gemini-2.5-flash",
         ModelType.STANDARD: "anthropic/claude-sonnet-4",
         ModelType.FAST_REASONING: "openai/o4-mini",
         ModelType.REASONING: "openai/o3",
@@ -295,17 +295,17 @@ class ReactAgentService:
             # Save AI message with token usage
             ai_msg_data: Dict[str, Union[str, int, float, None]] = {
                 "conversation_id": conversation_id,
-                "role": "assistant", 
-                "content": ai_message
+                "role": "assistant",
+                "content": ai_message,
             }
-            
+
             # Add token usage if available
             if token_usage:
                 ai_msg_data["input_tokens"] = token_usage.get("input_tokens")
                 ai_msg_data["output_tokens"] = token_usage.get("output_tokens")
                 ai_msg_data["total_tokens"] = token_usage.get("total_tokens")
                 ai_msg_data["model_cost"] = token_usage.get("cost")
-            
+
             ai_msg = Message(**ai_msg_data)
             db.add(ai_msg)
 
@@ -407,7 +407,9 @@ class ReactAgentService:
             usage_callback = UsageMetadataCallbackHandler()
 
             # Stream response from LangGraph agent using astream_events for real-time streaming
-            async for event in agent.astream_events(agent_input, version="v2", config={"callbacks": [usage_callback]}):
+            async for event in agent.astream_events(
+                agent_input, version="v2", config={"callbacks": [usage_callback]}
+            ):
                 event_type = event.get("event", "")
                 event_name = event.get("name", "")
                 event_data = event.get("data", {})
@@ -570,10 +572,10 @@ class ReactAgentService:
                 metadata = usage_callback.usage_metadata
                 if metadata:
                     token_usage_data = {
-                        "input_tokens": getattr(metadata, 'input_tokens', None),
-                        "output_tokens": getattr(metadata, 'output_tokens', None),
-                        "total_tokens": getattr(metadata, 'total_tokens', None),
-                        "cost": None  # LangGraph doesn't provide cost directly
+                        "input_tokens": getattr(metadata, "input_tokens", None),
+                        "output_tokens": getattr(metadata, "output_tokens", None),
+                        "total_tokens": getattr(metadata, "total_tokens", None),
+                        "cost": None,  # LangGraph doesn't provide cost directly
                     }
                     logger.info(f"Token usage captured: {token_usage_data}")
             except Exception as e:

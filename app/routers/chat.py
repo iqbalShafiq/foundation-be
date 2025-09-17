@@ -27,7 +27,7 @@ router = APIRouter(tags=["chat"])
 @router.post("/chat")
 async def chat(
     message: str = Form(...),
-    model: ModelType = Form(ModelType.STANDARD),
+    model_id: str = Form("anthropic/claude-sonnet-4"),
     conversation_id: Optional[str] = Form(None),
     images: Optional[List[UploadFile]] = File(None),
     # NEW: Document context parameters
@@ -108,7 +108,7 @@ async def chat(
 
     return StreamingResponse(
         chat_router_service.route_chat_request(
-            message, model, conversation_id, cast(int, current_user.id), image_data_list, context_sources, context_collection, parsed_document_ids
+            message, model_id, conversation_id, cast(int, current_user.id), image_data_list, context_sources, context_collection, parsed_document_ids
         ),
         media_type="text/plain",
         headers={

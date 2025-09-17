@@ -92,6 +92,22 @@ class AuthService:
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
+        
+        # Auto-create default model categories for new user
+        try:
+            from .user_model_category_service import UserModelCategoryService
+            category_service = UserModelCategoryService(db)
+            category_result = category_service.create_default_categories_for_user(db_user.id)
+            
+            if category_result["success"]:
+                print(f"Created {len(category_result['created_categories'])} default categories for user {db_user.username}")
+            else:
+                print(f"Warning: Failed to create default categories for user {db_user.username}: {category_result['message']}")
+                
+        except Exception as e:
+            # Don't fail user creation if category creation fails
+            print(f"Warning: Could not create default model categories for user {db_user.username}: {e}")
+        
         return db_user
 
     @staticmethod

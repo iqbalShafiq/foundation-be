@@ -18,6 +18,8 @@ from app.models import (
 from app.database import get_db
 from app.services.data_analysis_service import DataAnalysisService
 from app.services.react_agent_context import set_current_context
+from app.services.model_resolver_service import ModelResolverService
+from app.services.pricing_calculator_service import PricingCalculatorService
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +39,14 @@ class ReactAgentService:
         ModelType.REASONING: "openai/o3",
     }
 
-    def get_llm(self, model_type: ModelType) -> ChatOpenAI:
+    def get_llm(self, model_type: ModelType, user_id: Optional[int] = None) -> ChatOpenAI:
         """Get ChatOpenAI instance for the specified model"""
-        actual_model = self.MODEL_MAPPING[model_type]
+        # Get the actual model ID based on user preferences or fallback
+        if user_id:
+            actual_model = ModelResolverService.get_model_id_for_user(user_id, model_type)
+        else:
+            actual_model = self.MODEL_MAPPING[model_type]
+            
         return ChatOpenAI(
             base_url="https://openrouter.ai/api/v1",
             model=actual_model,
@@ -251,7 +258,7 @@ class ReactAgentService:
         user_id: int,
         user_message: str,
         ai_message: str,
-        model_type: ModelType,
+        model_id: str,
         image_urls: Optional[List[str]] = None,
         document_context: Optional[dict] = None,
         token_usage: Optional[Dict] = None,
@@ -272,7 +279,7 @@ class ReactAgentService:
                     id=conversation_id,
                     user_id=user_id,
                     title=title,
-                    model_type=model_type.value,
+                    model_type=model_id,
                 )
                 db.add(conversation)
             else:
@@ -318,13 +325,20 @@ class ReactAgentService:
 
     def create_react_agent(
         self,
-        model_type: ModelType,
+        model_id: str,
         context_sources: List[ContextSource],
         user_preferences: str,
+        user_id: Optional[int] = None,
     ):
         """Create React Agent with tools and context using LangGraph"""
-        # Get LLM
-        llm = self.get_llm(model_type)
+        # Create LLM directly with model_id
+        llm = ChatOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            model=model_id,
+            verbose=True,
+            temperature=0.7,
+            streaming=True,
+        )
 
         # Get tools - we'll enhance analyze_dataframe with context
         tools = DataAnalysisService.get_analysis_tools()
@@ -343,7 +357,7 @@ class ReactAgentService:
     async def generate_stream_response(
         self,
         message: str,
-        model_type: ModelType = ModelType.STANDARD,
+        model_id: str = "anthropic/claude-sonnet-4",
         conversation_id: str | None = None,
         user_id: int | None = None,
         images: Optional[List[ImageData]] = None,
@@ -368,12 +382,21 @@ class ReactAgentService:
             if user_id:
                 user_preferences = self._get_user_system_prompt(user_id)
 
-            # Agent
-            agent = self.create_react_agent(
-                model_type=model_type,
-                context_sources=context_sources or [],
-                user_preferences=user_preferences,
+            # Agent - create LLM directly with model_id
+            llm = ChatOpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                model=model_id,
+                verbose=True,
+                temperature=0.7,
+                streaming=True,
             )
+            
+            # Get tools and create agent
+            tools = DataAnalysisService.get_analysis_tools()
+            system_prompt = self._build_agent_system_prompt(
+                context_sources or [], user_preferences
+            )
+            agent = create_react_agent(model=llm, tools=tools, prompt=system_prompt)
 
             # Build context info
             document_context_info = None
@@ -571,13 +594,29 @@ class ReactAgentService:
             try:
                 metadata = usage_callback.usage_metadata
                 if metadata:
+                    input_tokens = getattr(metadata, "input_tokens", 0) or 0
+                    output_tokens = getattr(metadata, "output_tokens", 0) or 0
+                    
+                    # Use the provided model_id for accurate pricing
+                    actual_model_id = model_id
+                    
+                    # Calculate accurate cost using model metadata
+                    cost_data = PricingCalculatorService.calculate_cost(
+                        model_id=actual_model_id,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        image_count=len(images) if images else 0
+                    )
+                    
                     token_usage_data = {
-                        "input_tokens": getattr(metadata, "input_tokens", None),
-                        "output_tokens": getattr(metadata, "output_tokens", None),
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
                         "total_tokens": getattr(metadata, "total_tokens", None),
-                        "cost": None,  # LangGraph doesn't provide cost directly
+                        "cost": cost_data["total_cost"],  # Use accurate cost from model metadata
+                        "cost_breakdown": cost_data.get("cost_breakdown"),
+                        "model_id": actual_model_id
                     }
-                    logger.info(f"Token usage captured: {token_usage_data}")
+                    logger.info(f"Token usage captured with accurate pricing: {token_usage_data}")
             except Exception as e:
                 logger.error(f"Error capturing token usage: {e}")
                 token_usage_data = None
@@ -612,7 +651,7 @@ class ReactAgentService:
                     user_id,
                     message,
                     final_answer_for_storage,
-                    model_type,
+                    model_id,
                     image_urls,
                     combined_context_info if combined_context_info else None,
                     token_usage_data,

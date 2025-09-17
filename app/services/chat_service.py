@@ -16,6 +16,8 @@ from app.models import (
 )
 from app.database import get_db
 from .token_aggregation_service import TokenAggregationService
+from .model_resolver_service import ModelResolverService
+from .pricing_calculator_service import PricingCalculatorService
 
 logger = logging.getLogger(__name__)
 
@@ -32,17 +34,26 @@ class ChatService:
         ModelType.REASONING: "openai/o3",
     }
 
-    def get_llm(self, model_type: ModelType) -> ChatOpenAI:
+    def get_llm(self, model_type: ModelType, user_id: Optional[int] = None) -> ChatOpenAI:
         """Get or create ChatOpenAI instance for the specified model"""
-        if model_type not in self._llms:
-            actual_model = self.MODEL_MAPPING[model_type]
-            self._llms[model_type] = ChatOpenAI(
+        # Create a unique key that includes user context for caching
+        cache_key = f"{model_type.value}_{user_id}" if user_id else model_type.value
+        
+        if cache_key not in self._llms:
+            # Get the actual model ID based on user preferences or fallback
+            if user_id:
+                actual_model = ModelResolverService.get_model_id_for_user(user_id, model_type)
+            else:
+                actual_model = self.MODEL_MAPPING[model_type]
+                
+            self._llms[cache_key] = ChatOpenAI(
                 base_url="https://openrouter.ai/api/v1",
                 model=actual_model,
                 temperature=0.7,
                 streaming=True,
             )
-        return self._llms[model_type]
+            
+        return self._llms[cache_key]
 
     def get_memory(self, conversation_id: str) -> ConversationBufferWindowMemory:
         """Get or create memory for a conversation"""
@@ -89,11 +100,11 @@ class ChatService:
             logger.error(f"Error loading conversation history: {e}")
             # Don't fail if we can't load history - just continue with empty memory
 
-    def get_chat_response_sync(self, messages: List[Dict[str, str]], model_type: ModelType) -> str:
+    def get_chat_response_sync(self, messages: List[Dict[str, str]], model_type: ModelType, user_id: Optional[int] = None) -> str:
         """Get non-streaming chat response for message regeneration"""
         try:
             # Get the appropriate model
-            llm = self.get_llm(model_type)
+            llm = self.get_llm(model_type, user_id)
             
             # Convert to LangChain messages
             langchain_messages = []
@@ -247,7 +258,7 @@ class ChatService:
         user_id: int,
         user_message: str,
         ai_message: str,
-        model_type: ModelType,
+        model_id: str,
         image_urls: Optional[List[str]] = None,
         document_context: Optional[dict] = None,
         token_usage: Optional[Dict[str, Any]] = None,
@@ -268,7 +279,7 @@ class ChatService:
                     id=conversation_id,
                     user_id=user_id,
                     title=title,
-                    model_type=model_type.value,
+                    model_type=model_id,
                 )
                 db.add(conversation)
             else:
@@ -333,7 +344,7 @@ class ChatService:
     async def generate_stream_response(
         self,
         message: str,
-        model_type: ModelType = ModelType.STANDARD,
+        model_id: str = "anthropic/claude-sonnet-4",
         conversation_id: str | None = None,
         user_id: int | None = None,
         images: Optional[List[ImageData]] = None,
@@ -412,8 +423,13 @@ class ChatService:
             else:
                 messages.append(HumanMessage(content=enhanced_message))
 
-            # Get the appropriate LLM for the model type
-            llm = self.get_llm(model_type)
+            # Create LLM directly with the provided model_id
+            llm = ChatOpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                model=model_id,
+                temperature=0.7,
+                streaming=True,
+            )
 
             # Collect AI response content for memory storage
             ai_response_content = ""
@@ -438,12 +454,22 @@ class ChatService:
 
                         yield f"data: {json.dumps(data)}\n\n"
 
-                # Capture token usage after streaming
+                # Calculate accurate cost using model metadata
+                cost_data = PricingCalculatorService.calculate_cost(
+                    model_id=model_id,
+                    input_tokens=cb.prompt_tokens,
+                    output_tokens=cb.completion_tokens,
+                    image_count=len(images) if images else 0
+                )
+                
+                # Capture token usage with accurate pricing
                 token_usage_data = {
                     "input_tokens": cb.prompt_tokens,
                     "output_tokens": cb.completion_tokens,
                     "total_tokens": cb.total_tokens,
-                    "cost": cb.total_cost
+                    "cost": cost_data["total_cost"],  # Use accurate cost from model metadata
+                    "cost_breakdown": cost_data.get("cost_breakdown"),
+                    "model_id": model_id
                 }
 
             # Save the conversation to memory
@@ -459,7 +485,7 @@ class ChatService:
                     user_id,
                     message,
                     ai_response_content,
-                    model_type,
+                    model_id,
                     image_urls,
                     document_context_info,
                     token_usage_data,

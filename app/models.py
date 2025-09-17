@@ -24,7 +24,7 @@ class ImageData(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    model: ModelType = ModelType.STANDARD
+    model_id: str = "anthropic/claude-sonnet-4"  # Accept model ID directly
     conversation_id: Optional[str] = None
     images: Optional[List[ImageData]] = None
 
@@ -598,3 +598,67 @@ class ModelMetadataListResponse(BaseModel):
     models: List[ModelMetadataResponse]
     total_count: int
     updated_at: str
+
+
+# User Model Categories - Customizable model preferences per user
+class UserModelCategory(Base):
+    __tablename__ = "user_model_categories"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    category_name = Column(String, nullable=False)  # e.g., "Fast", "Standard", "Heavy Work"
+    display_name = Column(String, nullable=False)  # Display name for UI
+    model_id = Column(String, ForeignKey("model_metadata.id"), nullable=False)  # Reference to ModelMetadata
+    description = Column(Text, nullable=True)  # User description of when to use this
+    sort_order = Column(Integer, default=0)  # For ordering in UI
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    user = relationship("User")
+    model_metadata = relationship("ModelMetadata")
+    
+    # Ensure unique category name per user
+    __table_args__ = (
+        UniqueConstraint('user_id', 'category_name', name='unique_user_category'),
+    )
+
+
+# Pydantic models for User Model Categories
+class UserModelCategoryCreate(BaseModel):
+    category_name: str
+    display_name: str
+    model_id: str
+    description: Optional[str] = None
+    sort_order: Optional[int] = 0
+
+
+class UserModelCategoryUpdate(BaseModel):
+    category_name: Optional[str] = None
+    display_name: Optional[str] = None
+    model_id: Optional[str] = None
+    description: Optional[str] = None
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class UserModelCategoryResponse(BaseModel):
+    id: int
+    category_name: str
+    display_name: str
+    model_id: str
+    model_name: Optional[str] = None  # From ModelMetadata
+    model_pricing: Optional[Dict] = None  # Basic pricing info
+    description: Optional[str]
+    sort_order: int
+    is_active: bool
+    created_at: str
+    updated_at: str
+
+    class Config:
+        from_attributes = True
+
+
+class UserModelCategoriesListResponse(BaseModel):
+    categories: List[UserModelCategoryResponse]
+    total_count: int

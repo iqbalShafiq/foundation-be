@@ -51,7 +51,7 @@ class ChatRouterService:
     @staticmethod  
     async def route_chat_request(
         message: str, 
-        model_type: ModelType = ModelType.STANDARD,
+        model_id: str = "anthropic/claude-sonnet-4",
         conversation_id: str | None = None,
         user_id: int | None = None,
         images: Optional[List[ImageData]] = None,
@@ -64,7 +64,7 @@ class ChatRouterService:
         
         Args:
             message: User message
-            model_type: Model type to use
+            model_id: Model ID to use (e.g. "anthropic/claude-sonnet-4")
             conversation_id: Conversation ID
             user_id: User ID  
             images: List of images
@@ -86,7 +86,7 @@ class ChatRouterService:
             # Use React Agent for CSV/Excel analysis
             async for chunk in react_agent_service.generate_stream_response(
                 message=message,
-                model_type=model_type,
+                model_id=model_id,
                 conversation_id=conversation_id,
                 user_id=user_id,
                 images=images,
@@ -100,7 +100,7 @@ class ChatRouterService:
             # Use simple ChatOpenAI for normal chat or document Q&A
             async for chunk in chat_service.generate_stream_response(
                 message=message,
-                model_type=model_type, 
+                model_id=model_id, 
                 conversation_id=conversation_id,
                 user_id=user_id,
                 images=images,

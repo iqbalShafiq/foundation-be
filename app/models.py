@@ -25,6 +25,7 @@ class ImageData(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     model_id: str = "anthropic/claude-sonnet-4"  # Accept model ID directly
+    category_id: Optional[int] = None  # Optional category ID for UI display
     conversation_id: Optional[str] = None
     images: Optional[List[ImageData]] = None
 
@@ -149,6 +150,7 @@ class Conversation(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     title = Column(String, nullable=False)
     model_type = Column(String, nullable=False)
+    category_id = Column(Integer, ForeignKey("user_model_categories.id"), nullable=True)
     parent_conversation_id = Column(String, ForeignKey("conversations.id"), nullable=True, index=True)
     edited_message_id = Column(Integer, nullable=True)  # Which message was edited to create this branch
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -200,6 +202,8 @@ class ConversationResponse(BaseModel):
     id: str
     title: str
     model_type: str
+    category_id: Optional[int] = None
+    category_name: Optional[str] = None
     created_at: str
     updated_at: str
     message_count: int
@@ -264,6 +268,8 @@ class ConversationDetailResponse(BaseModel):
     id: str
     title: str
     model_type: str
+    category_id: Optional[int] = None
+    category_name: Optional[str] = None
     created_at: str
     updated_at: str
     parent_conversation_id: Optional[str] = None

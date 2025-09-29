@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, func, and_
 from typing import List, Optional
 import json
-from app.models import Conversation, Message, ConversationResponse, MessageResponse, MessageDocumentContext, DocumentContextInfo
+from app.models import Conversation, Message, ConversationResponse, MessageResponse, MessageDocumentContext, DocumentContextInfo, UserModelCategory
 
 
 class ConversationService:
@@ -124,10 +124,24 @@ class ConversationService:
             .scalar()
         )
         
+        # Get category info if category_id exists
+        category_name = None
+        category_id = getattr(conversation, 'category_id', None)
+        if category_id:
+            try:
+                category = self.db.query(UserModelCategory).filter(UserModelCategory.id == category_id).first()
+                if category:
+                    category_name = category.display_name
+            except Exception:
+                # If error, just continue without category name
+                pass
+        
         base_data = {
             "id": conversation.id,
             "title": conversation.title,
             "model_type": conversation.model_type,
+            "category_id": category_id,
+            "category_name": category_name,
             "created_at": conversation.created_at.isoformat(),
             "updated_at": conversation.updated_at.isoformat(),
             "message_count": message_count,

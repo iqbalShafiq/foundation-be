@@ -259,6 +259,7 @@ class ReactAgentService:
         user_message: str,
         ai_message: str,
         model_id: str,
+        category_id: Optional[int] = None,
         image_urls: Optional[List[str]] = None,
         document_context: Optional[dict] = None,
         token_usage: Optional[Dict] = None,
@@ -280,6 +281,7 @@ class ReactAgentService:
                     user_id=user_id,
                     title=title,
                     model_type=model_id,
+                    category_id=category_id,
                 )
                 db.add(conversation)
             else:
@@ -358,6 +360,7 @@ class ReactAgentService:
         self,
         message: str,
         model_id: str = "anthropic/claude-sonnet-4",
+        category_id: Optional[int] = None,
         conversation_id: str | None = None,
         user_id: int | None = None,
         images: Optional[List[ImageData]] = None,
@@ -652,6 +655,7 @@ class ReactAgentService:
                     message,
                     final_answer_for_storage,
                     model_id,
+                    category_id,
                     image_urls,
                     combined_context_info if combined_context_info else None,
                     token_usage_data,

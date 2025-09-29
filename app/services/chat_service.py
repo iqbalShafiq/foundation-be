@@ -259,6 +259,7 @@ class ChatService:
         user_message: str,
         ai_message: str,
         model_id: str,
+        category_id: Optional[int] = None,
         image_urls: Optional[List[str]] = None,
         document_context: Optional[dict] = None,
         token_usage: Optional[Dict[str, Any]] = None,
@@ -280,6 +281,7 @@ class ChatService:
                     user_id=user_id,
                     title=title,
                     model_type=model_id,
+                    category_id=category_id,
                 )
                 db.add(conversation)
             else:
@@ -345,6 +347,7 @@ class ChatService:
         self,
         message: str,
         model_id: str = "anthropic/claude-sonnet-4",
+        category_id: Optional[int] = None,
         conversation_id: str | None = None,
         user_id: int | None = None,
         images: Optional[List[ImageData]] = None,
@@ -486,6 +489,7 @@ class ChatService:
                     message,
                     ai_response_content,
                     model_id,
+                    category_id,
                     image_urls,
                     document_context_info,
                     token_usage_data,

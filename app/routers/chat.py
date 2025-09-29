@@ -28,6 +28,7 @@ router = APIRouter(tags=["chat"])
 async def chat(
     message: str = Form(...),
     model_id: str = Form("anthropic/claude-sonnet-4"),
+    category_id: Optional[int] = Form(None),
     conversation_id: Optional[str] = Form(None),
     images: Optional[List[UploadFile]] = File(None),
     # NEW: Document context parameters
@@ -108,7 +109,7 @@ async def chat(
 
     return StreamingResponse(
         chat_router_service.route_chat_request(
-            message, model_id, conversation_id, cast(int, current_user.id), image_data_list, context_sources, context_collection, parsed_document_ids
+            message, model_id, category_id, conversation_id, cast(int, current_user.id), image_data_list, context_sources, context_collection, parsed_document_ids
         ),
         media_type="text/plain",
         headers={
@@ -159,11 +160,26 @@ async def get_conversation_detail(
     
     conversation, messages = result
     
+    # Get category info if category_id exists
+    category_name = None
+    category_id = getattr(conversation, 'category_id', None)
+    if category_id:
+        try:
+            from app.models import UserModelCategory
+            category = db.query(UserModelCategory).filter(UserModelCategory.id == category_id).first()
+            if category:
+                category_name = category.display_name
+        except Exception:
+            # If error, just continue without category name
+            pass
+    
     return ConversationDetailResponse.model_validate(
         {
             "id": conversation.id,
             "title": conversation.title,
             "model_type": conversation.model_type,
+            "category_id": category_id,
+            "category_name": category_name,
             "created_at": conversation.created_at.isoformat(),
             "updated_at": conversation.updated_at.isoformat(),
             "parent_conversation_id": getattr(conversation, 'parent_conversation_id', None),

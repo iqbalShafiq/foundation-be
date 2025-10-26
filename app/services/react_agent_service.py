@@ -424,8 +424,8 @@ class ReactAgentService:
             final_answer_for_storage = ""
             accumulated_thinking = ""
             accumulated_answer = ""
-            chart_data_collected = None
-            chart_data_sent = False
+            chart_data_collected = []  # Changed to list to support multiple charts
+            charts_sent = set()  # Track which charts have been sent
             just_thinking = False
             token_usage_data = None
 
@@ -467,33 +467,39 @@ class ReactAgentService:
                     if tool_name == "generate_chart" and tool_output_str:
                         try:
                             # Parse chart data from string output
+                            current_chart = None
                             if (
                                 isinstance(tool_output_str, str)
                                 and tool_output_str.strip()
                             ):
-                                chart_data_collected = json.loads(
+                                current_chart = json.loads(
                                     tool_output_str.strip()
                                 )
                             else:
-                                chart_data_collected = tool_output_str
+                                current_chart = tool_output_str
 
-                            # Send chart data immediately after tool completion
-                            try:
-                                chart_json_str = json.dumps(
-                                    {
-                                        "type": "chart",
-                                        "content": chart_data_collected,
-                                        "done": False,
-                                        "conversation_id": conversation_id,
-                                    }
-                                )
-                                yield f"data: {chart_json_str}\n\n"
-                                chart_data_sent = True
-                            except (TypeError, ValueError) as e:
-                                logger.error(f"Error serializing chart data: {e}")
-                                yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart data generated but could not be serialized for display', 'done': False, 'conversation_id': conversation_id})}\n\n"
+                            # Append to list of charts (support multiple charts)
+                            if current_chart:
+                                chart_data_collected.append(current_chart)
+                                chart_index = len(chart_data_collected) - 1
 
-                            yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart generated successfully!', 'done': False, 'conversation_id': conversation_id})}\n\n"
+                                # Send chart data immediately after tool completion
+                                try:
+                                    chart_json_str = json.dumps(
+                                        {
+                                            "type": "chart",
+                                            "content": current_chart,
+                                            "done": False,
+                                            "conversation_id": conversation_id,
+                                        }
+                                    )
+                                    yield f"data: {chart_json_str}\n\n"
+                                    charts_sent.add(chart_index)
+                                except (TypeError, ValueError) as e:
+                                    logger.error(f"Error serializing chart data: {e}")
+                                    yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart data generated but could not be serialized for display', 'done': False, 'conversation_id': conversation_id})}\n\n"
+
+                                yield f"data: {json.dumps({'type': 'thinking', 'content': f'Chart {len(chart_data_collected)} generated successfully!', 'done': False, 'conversation_id': conversation_id})}\n\n"
                         except json.JSONDecodeError as e:
                             logger.error(f"Error parsing chart JSON data: {e}")
                             yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart generation completed', 'done': False, 'conversation_id': conversation_id})}\n\n"
@@ -522,24 +528,26 @@ class ReactAgentService:
                         accumulated_answer += content
                         final_answer_for_storage += content
 
-                        # Send chart data first if we have it and haven't sent it
-                        if chart_data_collected and not chart_data_sent:
-                            try:
-                                chart_json_str = json.dumps(
-                                    {
-                                        "type": "chart",
-                                        "content": chart_data_collected,
-                                        "done": False,
-                                        "conversation_id": conversation_id,
-                                    }
-                                )
-                                yield f"data: {chart_json_str}\n\n"
-                                chart_data_sent = True
-                            except (TypeError, ValueError) as e:
-                                logger.error(f"Error serializing chart data: {e}")
-                                # Send a simplified chart notification instead
-                                yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart data generated but could not be serialized', 'done': False, 'conversation_id': conversation_id})}\n\n"
-                                chart_data_sent = True
+                        # Send any unsent charts before starting the answer
+                        if chart_data_collected:
+                            for idx, chart in enumerate(chart_data_collected):
+                                if idx not in charts_sent:
+                                    try:
+                                        chart_json_str = json.dumps(
+                                            {
+                                                "type": "chart",
+                                                "content": chart,
+                                                "done": False,
+                                                "conversation_id": conversation_id,
+                                            }
+                                        )
+                                        yield f"data: {chart_json_str}\n\n"
+                                        charts_sent.add(idx)
+                                    except (TypeError, ValueError) as e:
+                                        logger.error(f"Error serializing chart data: {e}")
+                                        # Send a simplified chart notification instead
+                                        yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart data generated but could not be serialized', 'done': False, 'conversation_id': conversation_id})}\n\n"
+                                        charts_sent.add(idx)
 
                         yield f"data: {json.dumps({'type': 'answer', 'content': content, 'done': False, 'conversation_id': conversation_id})}\n\n"
 
@@ -558,22 +566,24 @@ class ReactAgentService:
                                 final_answer_for_storage = last_message.content
                                 yield f"data: {json.dumps({'type': 'answer', 'content': last_message.content, 'done': False, 'conversation_id': conversation_id})}\n\n"
 
-            # Send any remaining chart data that hasn't been sent yet
-            if chart_data_collected and not chart_data_sent:
-                try:
-                    chart_json_str = json.dumps(
-                        {
-                            "type": "chart",
-                            "content": chart_data_collected,
-                            "done": False,
-                            "conversation_id": conversation_id,
-                        }
-                    )
-                    yield f"data: {chart_json_str}\n\n"
-                    chart_data_sent = True
-                except (TypeError, ValueError) as e:
-                    logger.error(f"Error serializing chart data at completion: {e}")
-                    yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart data generated but could not be serialized', 'done': False, 'conversation_id': conversation_id})}\n\n"
+            # Send any remaining charts that haven't been sent yet
+            if chart_data_collected:
+                for idx, chart in enumerate(chart_data_collected):
+                    if idx not in charts_sent:
+                        try:
+                            chart_json_str = json.dumps(
+                                {
+                                    "type": "chart",
+                                    "content": chart,
+                                    "done": False,
+                                    "conversation_id": conversation_id,
+                                }
+                            )
+                            yield f"data: {chart_json_str}\n\n"
+                            charts_sent.add(idx)
+                        except (TypeError, ValueError) as e:
+                            logger.error(f"Error serializing chart data at completion: {e}")
+                            yield f"data: {json.dumps({'type': 'thinking', 'content': 'Chart data generated but could not be serialized', 'done': False, 'conversation_id': conversation_id})}\n\n"
 
             # Handle final completion
             if not final_answer_for_storage:
@@ -640,14 +650,15 @@ class ReactAgentService:
                     try:
                         # Test if chart data can be serialized
                         json.dumps(chart_data_collected)
+                        # Store as array to support multiple charts
                         combined_context_info["chart_data"] = chart_data_collected
                     except (TypeError, ValueError) as e:
                         logger.error(
                             f"Chart data cannot be serialized for database storage: {e}"
                         )
-                        combined_context_info["chart_data"] = {
-                            "error": "Chart data could not be serialized"
-                        }
+                        combined_context_info["chart_data"] = [
+                            {"error": "Chart data could not be serialized"}
+                        ]
 
                 self._save_conversation_and_messages_to_db(
                     conversation_id,

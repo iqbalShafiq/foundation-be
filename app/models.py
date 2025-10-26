@@ -233,7 +233,7 @@ class MessageResponse(BaseModel):
     content: str
     image_urls: Optional[List[str]] = None
     document_context: Optional[MessageDocumentContext] = None
-    chart_data: Optional[Dict] = None  # Chart data from generate_chart tool
+    chart_data: Optional[Union[Dict, List[Dict]]] = None  # Support both single chart (backward compat) and multiple charts
     # Branching fields
     parent_message_id: Optional[int] = None
     branch_id: Optional[str] = None

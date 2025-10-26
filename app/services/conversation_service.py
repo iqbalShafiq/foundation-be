@@ -182,9 +182,23 @@ class ConversationService:
                             context_chunks_count=context_data.get("context_chunks_count", 0)
                         )
                     
-                    # Handle chart data
+                    # Handle chart data with backward compatibility
+                    # Old format: single dict object
+                    # New format: array of dict objects
                     if "chart_data" in context_data:
-                        chart_data = context_data["chart_data"]
+                        raw_chart_data = context_data["chart_data"]
+
+                        # Backward compatibility: if it's a dict (old format), keep as-is
+                        # If it's a list (new format), keep as-is
+                        # Frontend should handle both formats
+                        if isinstance(raw_chart_data, dict):
+                            # Old format: single chart - keep as dict for backward compatibility
+                            chart_data = raw_chart_data
+                        elif isinstance(raw_chart_data, list):
+                            # New format: multiple charts
+                            chart_data = raw_chart_data
+                        else:
+                            chart_data = None
                         
             except (json.JSONDecodeError, ValueError, Exception):
                 # If JSON parsing fails or any other error, ignore document context
